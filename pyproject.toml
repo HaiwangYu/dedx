@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dedx-analysis"
+version = "0.1.0"
+description = "Extract mean and sigma of TPC dE/dx vs momentum using Gaussian Process Regression"
+authors = [
+  {name = "Codex Assistant"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "numpy",
+  "pandas",
+  "uproot",
+  "matplotlib",
+  "scikit-learn",
+]
+
+[project.scripts]
+dedx-analysis = "dedx_analysis.cli:main"

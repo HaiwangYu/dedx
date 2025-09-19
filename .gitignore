@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+.env/
+
+# Logs and local config
+*.log
+*.sqlite3
+
+# OS files
+.DS_Store
+
+# User-specific files
+*.swp
+*.pptx
+*.pdf
+*.root
