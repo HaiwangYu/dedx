@@ -16,6 +16,7 @@ setup(
     install_requires=[
         "numpy",
         "pandas",
+        "awkward>=2.0",
         "uproot",
         "matplotlib",
         "scikit-learn",

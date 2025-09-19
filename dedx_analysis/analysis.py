@@ -8,6 +8,7 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 import uproot
+import awkward as ak
 from matplotlib import pyplot as plt
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, RBF, WhiteKernel
@@ -107,12 +108,21 @@ def _load_filtered_data(config: DedxAnalysisConfig) -> dict:
         tree = file[config.tree_name]
         arrays = tree.arrays(
             [config.dedx_branch, config.momentum_branch, config.pid_branch],
-            library="np",
+            library="ak",
         )
 
     dedx = arrays[config.dedx_branch]
     momentum = arrays[config.momentum_branch]
     pid = arrays[config.pid_branch]
+
+    if getattr(dedx, "ndim", 1) > 1:
+        dedx = ak.flatten(dedx, axis=None)
+        momentum = ak.flatten(momentum, axis=None)
+        pid = ak.flatten(pid, axis=None)
+
+    dedx = _ak_to_numpy(dedx)
+    momentum = _ak_to_numpy(momentum)
+    pid = _ak_to_numpy(pid)
 
     pid_abs = np.abs(pid)
     pid_match = np.isclose(pid_abs, float(config.pid), atol=0.5)
@@ -132,6 +142,15 @@ def _load_filtered_data(config: DedxAnalysisConfig) -> dict:
     p_signed = momentum_sel * np.sign(pid_sel)
 
     return {"dedx": dedx_sel, "momentum": momentum_sel, "pid": pid_sel, "p_signed": p_signed}
+
+
+def _ak_to_numpy(array: ak.Array) -> np.ndarray:
+    """Convert an Awkward array to a plain NumPy array, preserving NaNs."""
+
+    np_array = ak.to_numpy(array, allow_missing=True)
+    if np.ma.isMaskedArray(np_array):
+        np_array = np_array.filled(np.nan)
+    return np.asarray(np_array)
 
 
 def _build_histogram(
