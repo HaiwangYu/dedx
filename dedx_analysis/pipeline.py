@@ -226,6 +226,76 @@ def evaluate_pid_bands(
     return results
 
 
+def plot_combined_bands(
+    band_results: Sequence[PIDBandResult],
+    *,
+    output_path: str | Path,
+    title: str | None = None,
+) -> Path:
+    """Overlay multiple PID bands on the same figure."""
+
+    if not band_results:
+        raise DedxAnalysisError("No band results provided for combined plotting")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    for index, result in enumerate(sorted(band_results, key=lambda item: item.pid)):
+        df = pd.read_csv(result.csv_path)
+        required_columns = {"momentum", "dedx_mean", "dedx_sigma"}
+        missing = required_columns.difference(df.columns)
+        if missing:
+            raise DedxAnalysisError(
+                f"Band file '{result.csv_path}' missing columns: {', '.join(sorted(missing))}"
+            )
+
+        momentum = df["momentum"].to_numpy()
+        mean = df["dedx_mean"].to_numpy()
+        sigma = df["dedx_sigma"].to_numpy()
+
+        valid = np.isfinite(momentum) & np.isfinite(mean) & np.isfinite(sigma)
+        if not np.any(valid):
+            continue
+
+        momentum = momentum[valid]
+        mean = mean[valid]
+        sigma = np.where(sigma[valid] > 0, sigma[valid], np.nan)
+
+        order = np.argsort(momentum)
+        momentum = momentum[order]
+        mean = mean[order]
+        sigma = sigma[order]
+
+        lower = mean - sigma
+        upper = mean + sigma
+
+        label = f"PID {result.pid}"
+        ax.plot(momentum, mean, label=label)
+        with np.errstate(invalid="ignore"):
+            band_mask = np.isfinite(lower) & np.isfinite(upper)
+            if np.any(band_mask):
+                ax.fill_between(
+                    momentum[band_mask],
+                    lower[band_mask],
+                    upper[band_mask],
+                    alpha=0.2,
+                )
+
+    ax.set_xlabel("Momentum × charge [GeV/c]")
+    ax.set_ylabel("dE/dx")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    if title:
+        ax.set_title(title)
+
+    fig.tight_layout()
+    fig.savefig(output_path)
+    plt.close(fig)
+    return output_path.resolve()
+
+
 def _load_band_models(band_results: Iterable[PIDBandResult]) -> dict[int, _BandModel]:
     models: dict[int, _BandModel] = {}
     for result in band_results:

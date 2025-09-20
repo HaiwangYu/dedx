@@ -6,6 +6,7 @@ from .pipeline import (
     SpeciesEvaluationResult,
     evaluate_pid_bands,
     generate_pid_bands,
+    plot_combined_bands,
 )
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "SpeciesEvaluationResult",
     "generate_pid_bands",
     "evaluate_pid_bands",
+    "plot_combined_bands",
 ]
 
 __version__ = "0.1.0"

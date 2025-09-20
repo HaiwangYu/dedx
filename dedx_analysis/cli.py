@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from .analysis import DedxAnalysisConfig, DedxAnalysisError, run_analysis
-from .pipeline import evaluate_pid_bands, generate_pid_bands
+from .pipeline import evaluate_pid_bands, generate_pid_bands, plot_combined_bands
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -86,6 +86,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Filename prefix for generated band CSV/PNG files",
     )
     parser.add_argument(
+        "--combined-band-plot",
+        help="Path to write a single plot overlaying all generated bands",
+    )
+    parser.add_argument(
         "--skip-evaluation",
         action="store_true",
         help="Skip evaluation step when running with --pid-list",
@@ -151,6 +155,19 @@ def main(argv: list[str] | None = None) -> int:
         print("Band generation complete")
         for result in band_results:
             print(f"PID {result.pid}: CSV {result.csv_path}, plot {result.plot_path}")
+
+        if args.combined_band_plot:
+            try:
+                combined_path = plot_combined_bands(
+                    band_results,
+                    output_path=args.combined_band_plot,
+                    title="dE/dx bands",
+                )
+            except DedxAnalysisError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+
+            print(f"Combined band plot saved to: {combined_path}")
 
         if args.skip_evaluation:
             return 0
