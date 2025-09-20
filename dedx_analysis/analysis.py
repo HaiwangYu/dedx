@@ -96,33 +96,17 @@ def run_analysis(config: DedxAnalysisConfig) -> dict:
 def _load_filtered_data(config: DedxAnalysisConfig) -> dict:
     """Load ROOT data and apply selection cuts."""
 
-    root_path = Path(config.input_file)
-    if not root_path.exists():
-        raise DedxAnalysisError(f"Input file not found: {root_path}")
+    arrays = load_root_branches(
+        input_file=config.input_file,
+        tree_name=config.tree_name,
+        dedx_branch=config.dedx_branch,
+        momentum_branch=config.momentum_branch,
+        pid_branch=config.pid_branch,
+    )
 
-    with uproot.open(root_path) as file:
-        if config.tree_name not in file:
-            raise DedxAnalysisError(
-                f"Tree '{config.tree_name}' not found in file '{root_path.name}'"
-            )
-        tree = file[config.tree_name]
-        arrays = tree.arrays(
-            [config.dedx_branch, config.momentum_branch, config.pid_branch],
-            library="ak",
-        )
-
-    dedx = arrays[config.dedx_branch]
-    momentum = arrays[config.momentum_branch]
-    pid = arrays[config.pid_branch]
-
-    if getattr(dedx, "ndim", 1) > 1:
-        dedx = ak.flatten(dedx, axis=None)
-        momentum = ak.flatten(momentum, axis=None)
-        pid = ak.flatten(pid, axis=None)
-
-    dedx = _ak_to_numpy(dedx)
-    momentum = _ak_to_numpy(momentum)
-    pid = _ak_to_numpy(pid)
+    dedx = arrays["dedx"]
+    momentum = arrays["momentum"]
+    pid = arrays["pid"]
 
     pid_abs = np.abs(pid)
     pid_match = np.isclose(pid_abs, float(config.pid), atol=0.5)
@@ -151,6 +135,47 @@ def _ak_to_numpy(array: ak.Array) -> np.ndarray:
     if np.ma.isMaskedArray(np_array):
         np_array = np_array.filled(np.nan)
     return np.asarray(np_array)
+
+
+def load_root_branches(
+    *,
+    input_file: str,
+    tree_name: str,
+    dedx_branch: str,
+    momentum_branch: str,
+    pid_branch: str,
+) -> dict:
+    """Load dedx, momentum, and pid branches from a ROOT file as NumPy arrays."""
+
+    root_path = Path(input_file)
+    if not root_path.exists():
+        raise DedxAnalysisError(f"Input file not found: {root_path}")
+
+    with uproot.open(root_path) as file:
+        if tree_name not in file:
+            raise DedxAnalysisError(
+                f"Tree '{tree_name}' not found in file '{root_path.name}'"
+            )
+        tree = file[tree_name]
+        arrays = tree.arrays(
+            [dedx_branch, momentum_branch, pid_branch],
+            library="ak",
+        )
+
+    dedx = arrays[dedx_branch]
+    momentum = arrays[momentum_branch]
+    pid = arrays[pid_branch]
+
+    if getattr(dedx, "ndim", 1) > 1:
+        dedx = ak.flatten(dedx, axis=None)
+        momentum = ak.flatten(momentum, axis=None)
+        pid = ak.flatten(pid, axis=None)
+
+    return {
+        "dedx": _ak_to_numpy(dedx),
+        "momentum": _ak_to_numpy(momentum),
+        "pid": _ak_to_numpy(pid),
+    }
 
 
 def _build_histogram(
