@@ -333,7 +333,7 @@ def _compute_score_matrix(
         model = band_models[pid_value]
         mean, sigma = model.evaluate(p_signed)
         with np.errstate(divide="ignore", invalid="ignore"):
-            score = np.abs((dedx - mean) / sigma)
+            score = -np.abs((dedx - mean) / sigma)
         scores.append(score)
     return np.vstack(scores)
 
