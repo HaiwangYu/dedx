@@ -66,6 +66,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Momentum × charge window to exclude from GPR fits",
     )
     parser.add_argument(
+        "--analysis-momentum-range",
+        nargs=2,
+        type=float,
+        metavar=("MIN", "MAX"),
+        default=(-0.3, 0.3),
+        help="Signed momentum window retained for analysis",
+    )
+    parser.add_argument(
         "--dedx-range",
         nargs=2,
         type=float,
@@ -82,6 +90,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--output-plot",
         default="dedx_summary.png",
         help="Path for the visualization output",
+    )
+    parser.add_argument(
+        "--max-events",
+        type=int,
+        default=0,
+        help="Maximum number of events to use after selection (0 means all)",
     )
     parser.add_argument(
         "--band-output-dir",
@@ -128,6 +142,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=42,
         help="Random seed for subsampling",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable progress bars",
+    )
     return parser.parse_args(argv)
 
 
@@ -152,6 +171,9 @@ def main(argv: list[str] | None = None) -> int:
                 momentum_range=tuple(args.momentum_range),
                 dedx_range=tuple(args.dedx_range),
                 momentum_gap=tuple(args.momentum_gap),
+                analysis_momentum_range=tuple(args.analysis_momentum_range),
+                max_events=args.max_events,
+                show_progress=not args.no_progress,
                 output_dir=args.band_output_dir,
                 band_prefix=args.band_prefix,
                 sample_size=sample_size,
@@ -222,6 +244,9 @@ def main(argv: list[str] | None = None) -> int:
         momentum_range=tuple(args.momentum_range),
         dedx_range=tuple(args.dedx_range),
         momentum_gap=tuple(args.momentum_gap),
+        analysis_momentum_range=tuple(args.analysis_momentum_range),
+        max_events=args.max_events,
+        show_progress=not args.no_progress,
         output_csv=args.output_csv,
         output_plot=args.output_plot,
         sample_size=sample_size,

@@ -20,6 +20,7 @@ setup(
         "uproot",
         "matplotlib",
         "scikit-learn",
+        "tqdm",
     ],
     entry_points={
         "console_scripts": [

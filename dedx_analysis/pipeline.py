@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -77,6 +77,9 @@ def generate_pid_bands(
     momentum_range: tuple[float, float],
     dedx_range: tuple[float, float],
     momentum_gap: tuple[float, float] = (-0.2, 0.2),
+    analysis_momentum_range: Optional[tuple[float, float]] = (-0.3, 0.3),
+    max_events: int = 0,
+    show_progress: bool = True,
     output_dir: str | Path,
     band_prefix: str,
     sample_size: int | None,
@@ -104,6 +107,9 @@ def generate_pid_bands(
             momentum_range=momentum_range,
             dedx_range=dedx_range,
             momentum_gap=momentum_gap,
+            analysis_momentum_range=analysis_momentum_range,
+            max_events=max_events,
+            show_progress=show_progress,
             output_csv=str(csv_path),
             output_plot=str(plot_path),
             sample_size=sample_size,

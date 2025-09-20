@@ -14,6 +14,11 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, RBF, WhiteKernel
 from sklearn.preprocessing import StandardScaler
 
+try:  # pragma: no cover - optional dependency fallback
+    from tqdm.auto import tqdm
+except ImportError:  # pragma: no cover - gracefully degrade when tqdm missing
+    tqdm = None
+
 
 @dataclass(slots=True)
 class DedxAnalysisConfig:
@@ -31,6 +36,9 @@ class DedxAnalysisConfig:
     momentum_range: Tuple[float, float] = (-3.0, 3.0)
     dedx_range: Tuple[float, float] = (0.0, 1000.0)
     momentum_gap: Tuple[float, float] = (-0.2, 0.2)
+    analysis_momentum_range: Optional[Tuple[float, float]] = (-0.3, 0.3)
+    max_events: int = 0
+    show_progress: bool = True
     output_csv: str = "dedx_summary.csv"
     output_plot: str = "dedx_summary.png"
     sample_size: Optional[int] = 5000
@@ -50,49 +58,79 @@ def run_analysis(config: DedxAnalysisConfig) -> dict:
         Collected results including histogram data and model outputs.
     """
 
-    data = _load_filtered_data(config)
-    if data["p_signed"].size < 2:
-        raise DedxAnalysisError("Not enough events after filtering to run GPR")
+    progress = _create_progress_bar(config.show_progress)
 
-    hist, momentum_edges, dedx_edges = _build_histogram(
-        data["p_signed"],
-        data["dedx"],
-        bins=(config.momentum_bins, config.dedx_bins),
-        ranges=(config.momentum_range, config.dedx_range),
-    )
+    try:
+        if progress is not None:
+            progress.set_description("Load data")
+        data = _load_filtered_data(config)
+        if progress is not None:
+            progress.update()
 
-    momentum_centers = 0.5 * (momentum_edges[:-1] + momentum_edges[1:])
+        if data["p_signed"].size < 2:
+            raise DedxAnalysisError("Not enough events after filtering to run GPR")
 
-    means, sigmas = _fit_gaussian_process(
-        data["p_signed"],
-        data["dedx"],
-        momentum_centers,
-        sample_size=config.sample_size,
-        random_seed=config.random_seed,
-        momentum_gap=config.momentum_gap,
-    )
+        if progress is not None:
+            progress.set_description("Build histogram")
+        hist, momentum_edges, dedx_edges = _build_histogram(
+            data["p_signed"],
+            data["dedx"],
+            bins=(config.momentum_bins, config.dedx_bins),
+            ranges=(config.momentum_range, config.dedx_range),
+        )
+        if progress is not None:
+            progress.update()
 
-    csv_path = _write_csv(config.output_csv, momentum_centers, means, sigmas)
-    plot_path = _plot_results(
-        hist,
-        momentum_edges,
-        dedx_edges,
-        momentum_centers,
-        means,
-        sigmas,
-        output_path=config.output_plot,
-    )
+        momentum_centers = 0.5 * (momentum_edges[:-1] + momentum_edges[1:])
 
-    return {
-        "histogram": hist,
-        "momentum_edges": momentum_edges,
-        "dedx_edges": dedx_edges,
-        "momentum_centers": momentum_centers,
-        "mean": means,
-        "sigma": sigmas,
-        "csv_path": csv_path,
-        "plot_path": plot_path,
-    }
+        if progress is not None:
+            progress.set_description("Fit GPR")
+        means, sigmas = _fit_gaussian_process(
+            data["p_signed"],
+            data["dedx"],
+            momentum_centers,
+            sample_size=config.sample_size,
+            random_seed=config.random_seed,
+            momentum_gap=config.momentum_gap,
+            analysis_range=config.analysis_momentum_range,
+        )
+        if progress is not None:
+            progress.update()
+
+        if progress is not None:
+            progress.set_description("Write CSV")
+        csv_path = _write_csv(config.output_csv, momentum_centers, means, sigmas)
+        if progress is not None:
+            progress.update()
+
+        if progress is not None:
+            progress.set_description("Plot results")
+        plot_path = _plot_results(
+            hist,
+            momentum_edges,
+            dedx_edges,
+            momentum_centers,
+            means,
+            sigmas,
+            output_path=config.output_plot,
+        )
+        if progress is not None:
+            progress.update()
+
+        return {
+            "histogram": hist,
+            "momentum_edges": momentum_edges,
+            "dedx_edges": dedx_edges,
+            "momentum_centers": momentum_centers,
+            "mean": means,
+            "sigma": sigmas,
+            "csv_path": csv_path,
+            "plot_path": plot_path,
+        }
+    finally:
+        if progress is not None:
+            progress.set_description("Done")
+            progress.close()
 
 
 def _load_filtered_data(config: DedxAnalysisConfig) -> dict:
@@ -110,11 +148,19 @@ def _load_filtered_data(config: DedxAnalysisConfig) -> dict:
     momentum = arrays["momentum"]
     pid = arrays["pid"]
 
+    p_signed_all = momentum * np.sign(pid)
+
     pid_abs = np.abs(pid)
     pid_match = np.isclose(pid_abs, float(config.pid), atol=0.5)
     finite_mask = np.isfinite(dedx) & np.isfinite(momentum) & np.isfinite(pid)
     dedx_mask = dedx < config.dedx_max
+
     selection = pid_match & finite_mask & dedx_mask
+
+    if config.analysis_momentum_range is not None:
+        window_min, window_max = sorted(config.analysis_momentum_range)
+        momentum_window = (p_signed_all >= window_min) & (p_signed_all <= window_max)
+        selection &= momentum_window
 
     if not np.any(selection):
         raise DedxAnalysisError(
@@ -124,8 +170,15 @@ def _load_filtered_data(config: DedxAnalysisConfig) -> dict:
     dedx_sel = dedx[selection]
     momentum_sel = momentum[selection]
     pid_sel = pid[selection]
+    p_signed = p_signed_all[selection]
 
-    p_signed = momentum_sel * np.sign(pid_sel)
+    if config.max_events and config.max_events > 0 and dedx_sel.size > config.max_events:
+        rng = np.random.default_rng(config.random_seed)
+        indices = rng.choice(dedx_sel.size, size=config.max_events, replace=False)
+        dedx_sel = dedx_sel[indices]
+        momentum_sel = momentum_sel[indices]
+        pid_sel = pid_sel[indices]
+        p_signed = p_signed[indices]
 
     return {"dedx": dedx_sel, "momentum": momentum_sel, "pid": pid_sel, "p_signed": p_signed}
 
@@ -137,6 +190,12 @@ def _ak_to_numpy(array: ak.Array) -> np.ndarray:
     if np.ma.isMaskedArray(np_array):
         np_array = np_array.filled(np.nan)
     return np.asarray(np_array)
+
+
+def _create_progress_bar(enabled: bool, total: int = 5):
+    if not enabled or tqdm is None:
+        return None
+    return tqdm(total=total, leave=False, unit="step")
 
 
 def load_root_branches(
@@ -205,6 +264,7 @@ def _fit_gaussian_process(
     sample_size: Optional[int],
     random_seed: Optional[int],
     momentum_gap: Tuple[float, float],
+    analysis_range: Optional[Tuple[float, float]],
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Fit a Gaussian Process to dedx vs momentum data."""
 
@@ -213,24 +273,29 @@ def _fit_gaussian_process(
     y = dedx
 
     gap_min, gap_max = sorted(momentum_gap)
+    if analysis_range is not None:
+        analysis_min, analysis_max = sorted(analysis_range)
+    else:
+        analysis_min, analysis_max = -np.inf, np.inf
     mean = np.full_like(evaluation_points, np.nan, dtype=float)
     std = np.full_like(evaluation_points, np.nan, dtype=float)
 
     region_specs = (
-        ("negative", lambda values: values <= gap_min),
-        ("positive", lambda values: values >= gap_max),
+        (
+            "negative",
+            lambda values: (values <= gap_min) & (values >= analysis_min),
+        ),
+        (
+            "positive",
+            lambda values: (values >= gap_max) & (values <= analysis_max),
+        ),
     )
 
     for region_name, selector in region_specs:
         region_mask = selector(x[:, 0])
         sample_count = int(np.count_nonzero(region_mask))
         if sample_count < 2:
-            raise DedxAnalysisError(
-                "Not enough samples in the {region} momentum region after applying the gap "
-                "({gap_min}, {gap_max}).".format(
-                    region=region_name, gap_min=gap_min, gap_max=gap_max
-                )
-            )
+            continue
 
         x_region = x[region_mask]
         y_region = y[region_mask]

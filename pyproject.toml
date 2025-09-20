@@ -18,6 +18,7 @@ dependencies = [
   "uproot",
   "matplotlib",
   "scikit-learn",
+  "tqdm",
 ]
 
 [project.scripts]

@@ -27,10 +27,11 @@ Single-species band extraction:
 ```bash
 python -m dedx_analysis \
   --input-file combined.root \
-  --pid 211 \
+  --pid 2212 \
   --tree-name T \
-  --output-csv pion_dedx.csv \
-  --output-plot pion_dedx.png
+  --analysis-momentum-range 0.5 3.0 \
+  --output-csv dedx_2212.csv \
+  --output-plot dedx_2212.png
 ```
 
 Batch processing for π/K/p plus evaluation and a combined plot:
@@ -39,6 +40,7 @@ Batch processing for π/K/p plus evaluation and a combined plot:
 dedx-analysis \
   --input-file combined.root \
   --pid-list 211 321 2212 \
+  --analysis-momentum-range 0.5 3.0 \
   --band-output-dir bands \
   --combined-band-plot bands/dedx_bands_all.png \
   --evaluation-output-dir evaluation
@@ -46,7 +48,7 @@ dedx-analysis \
 
 This command writes individual band CSV/PNG pairs to `bands/`, overlays all species in `dedx_bands_all.png`, and generates per-species efficiency/purity curves in `evaluation/`. Add `--skip-evaluation` to omit the final comparison step or `--evaluation-file` to point at a different ROOT file.
 
-Control how aggressively the models avoid the charge-sign crossover by providing `--momentum-gap MIN MAX` (default `-0.2 0.2`).
+Control how aggressively the models avoid the charge-sign crossover by providing `--momentum-gap MIN MAX` (default `-0.2 0.2`). Restrict the signed momentum used for the fits via `--analysis-momentum-range MIN MAX` (default `-0.3 0.3`) and cap the number of selected events with `--max-events N` (default `0`, meaning all events). Use `--no-progress` to disable the CLI progress bar.
 
 Run `dedx-analysis --help` for the full set of arguments.
 
