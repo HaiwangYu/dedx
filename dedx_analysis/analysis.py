@@ -30,6 +30,7 @@ class DedxAnalysisConfig:
     dedx_bins: int = 400
     momentum_range: Tuple[float, float] = (-3.0, 3.0)
     dedx_range: Tuple[float, float] = (0.0, 1000.0)
+    momentum_gap: Tuple[float, float] = (-0.2, 0.2)
     output_csv: str = "dedx_summary.csv"
     output_plot: str = "dedx_summary.png"
     sample_size: Optional[int] = 5000
@@ -68,6 +69,7 @@ def run_analysis(config: DedxAnalysisConfig) -> dict:
         momentum_centers,
         sample_size=config.sample_size,
         random_seed=config.random_seed,
+        momentum_gap=config.momentum_gap,
     )
 
     csv_path = _write_csv(config.output_csv, momentum_centers, means, sigmas)
@@ -202,6 +204,7 @@ def _fit_gaussian_process(
     *,
     sample_size: Optional[int],
     random_seed: Optional[int],
+    momentum_gap: Tuple[float, float],
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Fit a Gaussian Process to dedx vs momentum data."""
 
@@ -209,22 +212,52 @@ def _fit_gaussian_process(
     x = momentum.reshape(-1, 1)
     y = dedx
 
-    if sample_size is not None and sample_size < x.shape[0]:
-        indices = rng.choice(x.shape[0], size=sample_size, replace=False)
-        x = x[indices]
-        y = y[indices]
+    gap_min, gap_max = sorted(momentum_gap)
+    mean = np.full_like(evaluation_points, np.nan, dtype=float)
+    std = np.full_like(evaluation_points, np.nan, dtype=float)
 
-    scaler = StandardScaler()
-    x_scaled = scaler.fit_transform(x)
-    kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e2)) + WhiteKernel(
-        noise_level=1.0, noise_level_bounds=(1e-5, 1e1)
+    region_specs = (
+        ("negative", lambda values: values <= gap_min),
+        ("positive", lambda values: values >= gap_max),
     )
-    gpr = GaussianProcessRegressor(kernel=kernel, alpha=1e-6, normalize_y=True)
-    gpr.fit(x_scaled, y)
 
-    x_eval = evaluation_points.reshape(-1, 1)
-    x_eval_scaled = scaler.transform(x_eval)
-    mean, std = gpr.predict(x_eval_scaled, return_std=True)
+    for region_name, selector in region_specs:
+        region_mask = selector(x[:, 0])
+        sample_count = int(np.count_nonzero(region_mask))
+        if sample_count < 2:
+            raise DedxAnalysisError(
+                "Not enough samples in the {region} momentum region after applying the gap "
+                "({gap_min}, {gap_max}).".format(
+                    region=region_name, gap_min=gap_min, gap_max=gap_max
+                )
+            )
+
+        x_region = x[region_mask]
+        y_region = y[region_mask]
+
+        if sample_size is not None and sample_size < sample_count:
+            indices = rng.choice(sample_count, size=sample_size, replace=False)
+            x_region = x_region[indices]
+            y_region = y_region[indices]
+
+        scaler = StandardScaler()
+        x_scaled = scaler.fit_transform(x_region)
+        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(
+            length_scale=1.0, length_scale_bounds=(1e-2, 1e2)
+        ) + WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e1))
+        gpr = GaussianProcessRegressor(kernel=kernel, alpha=1e-6, normalize_y=True)
+        gpr.fit(x_scaled, y_region)
+
+        eval_mask = selector(evaluation_points)
+        if not np.any(eval_mask):
+            continue
+
+        x_eval = evaluation_points[eval_mask].reshape(-1, 1)
+        x_eval_scaled = scaler.transform(x_eval)
+        region_mean, region_std = gpr.predict(x_eval_scaled, return_std=True)
+        mean[eval_mask] = region_mean
+        std[eval_mask] = region_std
+
     return mean, std
 
 

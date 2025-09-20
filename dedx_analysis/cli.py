@@ -58,6 +58,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Momentum range (GeV/c) for the histogram",
     )
     parser.add_argument(
+        "--momentum-gap",
+        nargs=2,
+        type=float,
+        metavar=("MIN", "MAX"),
+        default=(-0.2, 0.2),
+        help="Momentum × charge window to exclude from GPR fits",
+    )
+    parser.add_argument(
         "--dedx-range",
         nargs=2,
         type=float,
@@ -143,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                 dedx_bins=args.dedx_bins,
                 momentum_range=tuple(args.momentum_range),
                 dedx_range=tuple(args.dedx_range),
+                momentum_gap=tuple(args.momentum_gap),
                 output_dir=args.band_output_dir,
                 band_prefix=args.band_prefix,
                 sample_size=sample_size,
@@ -212,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         dedx_bins=args.dedx_bins,
         momentum_range=tuple(args.momentum_range),
         dedx_range=tuple(args.dedx_range),
+        momentum_gap=tuple(args.momentum_gap),
         output_csv=args.output_csv,
         output_plot=args.output_plot,
         sample_size=sample_size,

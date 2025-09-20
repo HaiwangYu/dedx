@@ -46,6 +46,8 @@ dedx-analysis \
 
 This command writes individual band CSV/PNG pairs to `bands/`, overlays all species in `dedx_bands_all.png`, and generates per-species efficiency/purity curves in `evaluation/`. Add `--skip-evaluation` to omit the final comparison step or `--evaluation-file` to point at a different ROOT file.
 
+Control how aggressively the models avoid the charge-sign crossover by providing `--momentum-gap MIN MAX` (default `-0.2 0.2`).
+
 Run `dedx-analysis --help` for the full set of arguments.
 
 ## Outputs
