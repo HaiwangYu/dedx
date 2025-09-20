@@ -5,19 +5,24 @@ import argparse
 import sys
 from pathlib import Path
 
-from .analysis import DedxAnalysisConfig, DedxAnalysisError, run_analysis
-from .pipeline import evaluate_pid_bands, generate_pid_bands, plot_combined_bands
+from .analysis import DedxAnalysisError
+from .pipeline import (
+    PIDBandResult,
+    evaluate_pid_bands,
+    generate_pid_bands,
+    plot_combined_bands,
+)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract mean and sigma of TPC dE/dx vs momentum")
     parser.add_argument("--input-file", required=True, help="Path to the input ROOT file")
-    parser.add_argument("--pid", type=int, help="Absolute PID value to select (e.g. 211)")
     parser.add_argument(
         "--pid-list",
         nargs="+",
         type=int,
-        help="Process multiple absolute PID values in sequence and optionally evaluate",
+        required=True,
+        help="Absolute PID values to process (e.g. 211 321 2212)",
     )
     parser.add_argument("--tree-name", default="T", help="Name of the TTree inside the ROOT file")
     parser.add_argument("--dedx-branch", default="tpc_seeds_dedx", help="Branch name for dE/dx")
@@ -112,6 +117,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Path to write a single plot overlaying all generated bands",
     )
     parser.add_argument(
+        "--force-regenerate",
+        action="store_true",
+        help="Regenerate PID bands even if outputs already exist",
+    )
+    parser.add_argument(
         "--skip-evaluation",
         action="store_true",
         help="Skip evaluation step when running with --pid-list",
@@ -154,13 +164,43 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(list(sys.argv[1:] if argv is None else argv))
 
     sample_size = args.sample_size if args.sample_size and args.sample_size > 0 else None
+    pid_values = [abs(pid) for pid in args.pid_list]
 
-    if args.pid_list:
-        pid_values = [abs(pid) for pid in args.pid_list]
+    band_dir = Path(args.band_output_dir)
+    band_dir.mkdir(parents=True, exist_ok=True)
+
+    band_results: list[PIDBandResult] = []
+    missing_pids: list[int] = []
+    cached_pids: list[int] = []
+
+    for pid in pid_values:
+        csv_path = band_dir / f"{args.band_prefix}_{pid}.csv"
+        plot_path = band_dir / f"{args.band_prefix}_{pid}.png"
+
+        if not args.force_regenerate and csv_path.exists() and plot_path.exists():
+            band_results.append(
+                PIDBandResult(
+                    pid=pid,
+                    csv_path=csv_path.resolve(),
+                    plot_path=plot_path.resolve(),
+                )
+            )
+            cached_pids.append(pid)
+        else:
+            missing_pids.append(pid)
+
+    if missing_pids:
+        if args.force_regenerate:
+            print("Force regeneration requested; recomputing PID bands.")
+        else:
+            print(
+                "Generating PID bands for missing PIDs: "
+                + ", ".join(str(pid) for pid in missing_pids)
+            )
         try:
-            band_results = generate_pid_bands(
+            generated = generate_pid_bands(
                 input_file=args.input_file,
-                pids=pid_values,
+                pids=missing_pids,
                 tree_name=args.tree_name,
                 dedx_branch=args.dedx_branch,
                 momentum_branch=args.momentum_branch,
@@ -183,88 +223,69 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
 
-        print("Band generation complete")
-        for result in band_results:
-            print(f"PID {result.pid}: CSV {result.csv_path}, plot {result.plot_path}")
+        band_results.extend(generated)
+        print(
+            "Band generation complete for PIDs: "
+            + ", ".join(str(pid) for pid in missing_pids)
+        )
+    else:
+        print("All requested PID bands already exist; skipping band generation.")
 
-        if args.combined_band_plot:
-            try:
-                combined_path = plot_combined_bands(
-                    band_results,
-                    output_path=args.combined_band_plot,
-                    title="dE/dx bands",
-                )
-            except DedxAnalysisError as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                return 1
+    if cached_pids and not args.force_regenerate:
+        print(
+            "Using existing band outputs for PIDs: "
+            + ", ".join(str(pid) for pid in cached_pids)
+        )
 
-            print(f"Combined band plot saved to: {combined_path}")
+    if not band_results:
+        print("Error: No PID band outputs are available.", file=sys.stderr)
+        return 1
 
-        if args.skip_evaluation:
-            return 0
+    band_results.sort(key=lambda result: result.pid)
+    print("Available PID bands:")
+    for result in band_results:
+        print(f"  PID {result.pid}: CSV {result.csv_path}, plot {result.plot_path}")
 
-        evaluation_file = args.evaluation_file or args.input_file
+    if args.combined_band_plot:
         try:
-            evaluation_results = evaluate_pid_bands(
+            combined_path = plot_combined_bands(
                 band_results,
-                evaluation_file=evaluation_file,
-                tree_name=args.tree_name,
-                dedx_branch=args.dedx_branch,
-                momentum_branch=args.momentum_branch,
-                pid_branch=args.pid_branch,
-                dedx_max=args.dedx_max,
-                momentum_range=tuple(args.momentum_range),
-                momentum_bins=args.momentum_bins,
-                output_dir=args.evaluation_output_dir,
-                figure_prefix=args.evaluation_prefix,
+                output_path=args.combined_band_plot,
+                title="dE/dx bands",
             )
         except DedxAnalysisError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+        print(f"Combined band plot saved to: {combined_path}")
+    else:
+        print("Combined band plot skipped (no output path provided).")
 
-        print("Evaluation complete")
-        for result in evaluation_results:
-            print(f"PID {result.pid}: metrics {result.csv_path}, plot {result.plot_path}")
+    if args.skip_evaluation:
+        print("Evaluation skipped (--skip-evaluation).")
         return 0
 
-    if args.pid is None:
-        print("Error: --pid is required when --pid-list is not provided", file=sys.stderr)
-        return 2
-
-    config = DedxAnalysisConfig(
-        input_file=args.input_file,
-        pid=args.pid,
-        tree_name=args.tree_name,
-        dedx_branch=args.dedx_branch,
-        momentum_branch=args.momentum_branch,
-        pid_branch=args.pid_branch,
-        dedx_max=args.dedx_max,
-        momentum_bins=args.momentum_bins,
-        dedx_bins=args.dedx_bins,
-        momentum_range=tuple(args.momentum_range),
-        dedx_range=tuple(args.dedx_range),
-        momentum_gap=tuple(args.momentum_gap),
-        analysis_momentum_range=tuple(args.analysis_momentum_range),
-        max_events=args.max_events,
-        show_progress=not args.no_progress,
-        output_csv=args.output_csv,
-        output_plot=args.output_plot,
-        sample_size=sample_size,
-        random_seed=args.random_seed,
-    )
-
+    evaluation_file = args.evaluation_file or args.input_file
     try:
-        results = run_analysis(config)
+        evaluation_results = evaluate_pid_bands(
+            band_results,
+            evaluation_file=evaluation_file,
+            tree_name=args.tree_name,
+            dedx_branch=args.dedx_branch,
+            momentum_branch=args.momentum_branch,
+            pid_branch=args.pid_branch,
+            dedx_max=args.dedx_max,
+            momentum_range=tuple(args.momentum_range),
+            momentum_bins=args.momentum_bins,
+            output_dir=args.evaluation_output_dir,
+            figure_prefix=args.evaluation_prefix,
+        )
     except DedxAnalysisError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    summary_path = Path(results["csv_path"]).resolve()
-    plot_path = Path(results["plot_path"]).resolve()
-
-    print("Analysis complete")
-    print(f"CSV summary written to: {summary_path}")
-    print(f"Plot saved to: {plot_path}")
+    print("Evaluation complete")
+    for result in evaluation_results:
+        print(f"PID {result.pid}: metrics {result.csv_path}, plot {result.plot_path}")
     return 0
 
 

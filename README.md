@@ -50,6 +50,8 @@ This command writes individual band CSV/PNG pairs to `bands/`, overlays all spec
 
 Control how aggressively the models avoid the charge-sign crossover by providing `--momentum-gap MIN MAX` (default `-0.2 0.2`). Restrict the signed momentum used for the fits via `--analysis-momentum-range MIN MAX` (default `-0.3 0.3`) and cap the number of selected events with `--max-events N` (default `0`, meaning all events). Use `--no-progress` to disable the CLI progress bar.
 
+If band CSV/PNG outputs already exist in `--band-output-dir`, reruns will reuse them; pass `--force-regenerate` to rebuild the bands from scratch.
+
 Run `dedx-analysis --help` for the full set of arguments.
 
 ## Outputs
