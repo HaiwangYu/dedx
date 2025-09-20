@@ -22,19 +22,20 @@ pip install -e .
 
 ## Usage
 
-Single-species band extraction:
+The CLI always works with a PID list. To analyse a single species, pass a single PID value; for multiple species, list them all. Both entry points (`python -m dedx_analysis` and the installed `dedx-analysis`) accept the same arguments.
+
+Single-species example (protons only):
 
 ```bash
 python -m dedx_analysis \
   --input-file combined.root \
-  --pid 2212 \
-  --tree-name T \
+  --pid-list 2212 \
   --analysis-momentum-range 0.5 3.0 \
-  --output-csv dedx_2212.csv \
-  --output-plot dedx_2212.png
+  --band-output-dir bands \
+  --combined-band-plot bands/dedx_band_2212.png
 ```
 
-Batch processing for π/K/p plus evaluation and a combined plot:
+π/K/p batch run with evaluation and a shared overlay:
 
 ```bash
 dedx-analysis \
@@ -46,7 +47,7 @@ dedx-analysis \
   --evaluation-output-dir evaluation
 ```
 
-This command writes individual band CSV/PNG pairs to `bands/`, overlays all species in `dedx_bands_all.png`, and generates per-species efficiency/purity curves in `evaluation/`. Add `--skip-evaluation` to omit the final comparison step or `--evaluation-file` to point at a different ROOT file.
+Every run reports which PID bands are generated vs. reused, writes the individual CSV/PNG outputs to `--band-output-dir`, optionally produces a combined plot, and (unless `--skip-evaluation` is supplied) creates per-species efficiency/purity curves under `--evaluation-output-dir`. Provide `--evaluation-file` to compare against a different ROOT file.
 
 Control how aggressively the models avoid the charge-sign crossover by providing `--momentum-gap MIN MAX` (default `-0.2 0.2`). Restrict the signed momentum used for the fits via `--analysis-momentum-range MIN MAX` (default `-0.3 0.3`) and cap the number of selected events with `--max-events N` (default `0`, meaning all events). Use `--no-progress` to disable the CLI progress bar.
 
