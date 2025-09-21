@@ -42,8 +42,8 @@ dedx-analysis \
   --input-file calotrkana-1M.root \
   --pid-list 211 321 2212 \
   --force-regenerate \
-  --momentum-range 0.4 3.0 \
-  --analysis-momentum-range 0.4 3.0 \
+  --momentum-range 0.1 3.0 \
+  --analysis-momentum-range 0.1 3.0 \
   --band-output-dir bands \
   --combined-band-plot bands/dedx_bands_all.png \
   --evaluation-output-dir evaluation

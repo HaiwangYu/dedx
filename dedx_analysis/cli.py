@@ -67,7 +67,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         nargs=2,
         type=float,
         metavar=("MIN", "MAX"),
-        default=(-0.2, 0.2),
+        default=(-0.1, 0.1),
         help="Momentum × charge window to exclude from GPR fits",
     )
     parser.add_argument(

@@ -35,7 +35,7 @@ class DedxAnalysisConfig:
     dedx_bins: int = 400
     momentum_range: Tuple[float, float] = (-3.0, 3.0)
     dedx_range: Tuple[float, float] = (0.0, 1000.0)
-    momentum_gap: Tuple[float, float] = (-0.2, 0.2)
+    momentum_gap: Tuple[float, float] = (-0.1, 0.1)
     analysis_momentum_range: Optional[Tuple[float, float]] = (-0.3, 0.3)
     max_events: int = 0
     show_progress: bool = True

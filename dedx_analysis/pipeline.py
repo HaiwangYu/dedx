@@ -76,7 +76,7 @@ def generate_pid_bands(
     dedx_bins: int,
     momentum_range: tuple[float, float],
     dedx_range: tuple[float, float],
-    momentum_gap: tuple[float, float] = (-0.2, 0.2),
+    momentum_gap: tuple[float, float] = (-0.1, 0.1),
     analysis_momentum_range: Optional[tuple[float, float]] = (-0.3, 0.3),
     max_events: int = 0,
     show_progress: bool = True,
