@@ -41,10 +41,9 @@ python -m dedx_analysis \
 dedx-analysis \
   --input-file calotrkana-1M.root \
   --pid-list 211 321 2212 \
-  --force-regenerate \
   --momentum-range 0.1 3.0 \
   --analysis-momentum-range 0.1 3.0 \
-  --band-output-dir bands \
+  --band-output-dir bands-0.4-3.0-1M \
   --combined-band-plot bands/dedx_bands_all.png \
   --evaluation-output-dir evaluation
 ```
