@@ -80,7 +80,7 @@ dedx-analysis \
   --momentum-range 0.4 3.0 \
   --analysis-momentum-range 0.4 3.0 \
   --band-output-dir bands-0.4-3.0-1M \
+  --prior-distribution-dir priors-0.4-3.0-1M \
   --combined-band-plot bands-0.4-3.0-1M/dedx_bands_all.png \
-  --evaluation-output-dir evaluation-0.4-3.0-1M \
-  --prior-distribution-dir priors-0.4-3.0-1M
-```
+  --evaluation-output-dir evaluation-0.4-3.0-1M
+``` \

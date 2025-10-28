@@ -41,6 +41,7 @@ class PriorDistributionResult:
 
     pid: int
     csv_path: Path
+    plot_path: Path
 
 
 class _BandModel:
@@ -232,14 +233,66 @@ def generate_prior_distributions(
 
         csv_path = output_path / f"prior_{pid_value}.csv"
         df.to_csv(csv_path, index=False)
+        plot_path = output_path / f"prior_{pid_value}.png"
+        _plot_prior_distribution(
+            bin_lower=bin_lower,
+            bin_upper=bin_upper,
+            probabilities=probabilities,
+            pid_value=pid_value,
+            output_path=plot_path,
+        )
         results.append(
             PriorDistributionResult(
                 pid=pid_value,
                 csv_path=csv_path.resolve(),
+                plot_path=plot_path.resolve(),
             )
         )
 
     return results
+
+
+def plot_prior_distribution_from_csv(
+    *,
+    pid: int,
+    csv_path: str | Path,
+    output_path: str | Path,
+) -> Path:
+    """Render a prior distribution plot from an existing CSV file."""
+
+    df = pd.read_csv(csv_path)
+    required_columns = {
+        "momentum_bin_lower",
+        "momentum_bin_upper",
+        "probability",
+    }
+    missing = required_columns.difference(df.columns)
+    if missing:
+        raise DedxAnalysisError(
+            f"Prior file '{csv_path}' missing columns: {', '.join(sorted(missing))}"
+        )
+
+    bin_lower = df["momentum_bin_lower"].to_numpy()
+    bin_upper = df["momentum_bin_upper"].to_numpy()
+    probabilities = df["probability"].to_numpy()
+
+    if (
+        bin_lower.size != probabilities.size
+        or bin_upper.size != probabilities.size
+    ):
+        raise DedxAnalysisError(
+            f"Prior file '{csv_path}' has inconsistent column lengths"
+        )
+
+    plot_path = Path(output_path)
+    _plot_prior_distribution(
+        bin_lower=bin_lower,
+        bin_upper=bin_upper,
+        probabilities=probabilities,
+        pid_value=pid,
+        output_path=plot_path,
+    )
+    return plot_path.resolve()
 
 
 def evaluate_pid_bands(
@@ -592,6 +645,37 @@ def _plot_metrics(
     axes[1].grid(True, alpha=0.3)
 
     fig.suptitle(f"PID {pid_value} performance")
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path)
+    plt.close(fig)
+
+
+def _plot_prior_distribution(
+    *,
+    bin_lower: np.ndarray,
+    bin_upper: np.ndarray,
+    probabilities: np.ndarray,
+    pid_value: int,
+    output_path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4))
+    bin_centers = 0.5 * (bin_lower + bin_upper)
+    widths = bin_upper - bin_lower
+    widths = np.where(widths > 0, widths, 1e-3)
+    ax.bar(
+        bin_centers,
+        probabilities,
+        width=widths,
+        align="center",
+        color="tab:purple",
+        alpha=0.7,
+    )
+    ax.set_xlabel("Momentum × charge [GeV/c]")
+    ax.set_ylabel("Prior probability")
+    ax.set_title(f"PID {pid_value} prior distribution")
+    ax.set_ylim(bottom=0.0)
+    ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path)

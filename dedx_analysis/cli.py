@@ -13,6 +13,7 @@ from .pipeline import (
     generate_pid_bands,
     generate_prior_distributions,
     plot_combined_bands,
+    plot_prior_distribution_from_csv,
 )
 
 
@@ -211,15 +212,27 @@ def main(argv: list[str] | None = None) -> int:
 
         if prior_dir is not None:
             prior_csv = prior_dir / f"prior_{pid}.csv"
+            prior_png = prior_dir / f"prior_{pid}.png"
             if (
                 not args.prior_distribution_force_gen
                 and prior_csv.exists()
                 and prior_csv.is_file()
             ):
+                if not prior_png.exists():
+                    try:
+                        plot_prior_distribution_from_csv(
+                            pid=pid,
+                            csv_path=prior_csv,
+                            output_path=prior_png,
+                        )
+                    except DedxAnalysisError as exc:
+                        print(f"Error: {exc}", file=sys.stderr)
+                        return 1
                 prior_results.append(
                     PriorDistributionResult(
                         pid=pid,
                         csv_path=prior_csv.resolve(),
+                        plot_path=prior_png.resolve(),
                     )
                 )
                 cached_prior_pids.append(pid)
@@ -314,6 +327,9 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         prior_results.sort(key=lambda result: result.pid)
+        print("Available prior distributions:")
+        for result in prior_results:
+            print(f"  PID {result.pid}: CSV {result.csv_path}, plot {result.plot_path}")
 
     if not band_results:
         print("Error: No PID band outputs are available.", file=sys.stderr)
