@@ -68,3 +68,19 @@ Run `dedx-analysis --help` for the full set of arguments.
 ## Development
 
 The CLI entry point is defined in `dedx_analysis/cli.py`. Core analysis utilities live in `dedx_analysis/analysis.py`, while multi-species orchestration and evaluation helpers are in `dedx_analysis/pipeline.py`.
+
+## cheatsheet
+
+
+10/27
+```bash
+dedx-analysis \
+  --input-file calotrkana-1M.root \
+  --pid-list 211 321 2212 \
+  --momentum-range 0.4 3.0 \
+  --analysis-momentum-range 0.4 3.0 \
+  --band-output-dir bands-0.4-3.0-1M \
+  --combined-band-plot bands-0.4-3.0-1M/dedx_bands_all.png \
+  --evaluation-output-dir evaluation-0.4-3.0-1M \
+  --prior-distribution-dir priors-0.4-3.0-1M
+```

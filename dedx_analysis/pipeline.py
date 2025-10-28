@@ -35,6 +35,14 @@ class SpeciesEvaluationResult:
     plot_path: Path
 
 
+@dataclass(slots=True)
+class PriorDistributionResult:
+    """Summary of files generated for a single PID prior distribution."""
+
+    pid: int
+    csv_path: Path
+
+
 class _BandModel:
     """Interpolation helper around a momentum-dependent mean/sigma band."""
 
@@ -61,6 +69,21 @@ class _BandModel:
         )
         sigma = np.where(sigma > 0, sigma, np.nan)
         return mean, sigma
+
+
+class _PriorDistribution:
+    """Piecewise-constant prior probability lookup across momentum bins."""
+
+    def __init__(self, bin_edges: np.ndarray, probabilities: np.ndarray) -> None:
+        self._bin_edges = bin_edges
+        self._probabilities = probabilities
+
+    def evaluate(self, momentum_values: np.ndarray) -> np.ndarray:
+        indices = np.digitize(momentum_values, self._bin_edges) - 1
+        valid = (indices >= 0) & (indices < self._probabilities.size)
+        result = np.full(momentum_values.shape, np.nan, dtype=float)
+        result[valid] = self._probabilities[indices[valid]]
+        return result
 
 
 def generate_pid_bands(
@@ -127,6 +150,98 @@ def generate_pid_bands(
     return results
 
 
+def generate_prior_distributions(
+    *,
+    input_file: str,
+    pids: Sequence[int],
+    tree_name: str,
+    dedx_branch: str,
+    momentum_branch: str,
+    pid_branch: str,
+    dedx_max: float,
+    momentum_range: tuple[float, float],
+    momentum_bins: int,
+    analysis_momentum_range: Optional[tuple[float, float]] = (-0.3, 0.3),
+    max_events: int = 0,
+    output_dir: str | Path,
+) -> list[PriorDistributionResult]:
+    """Generate momentum priors for multiple PIDs using ROOT inputs."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    results: list[PriorDistributionResult] = []
+    arrays = load_root_branches(
+        input_file=input_file,
+        tree_name=tree_name,
+        dedx_branch=dedx_branch,
+        momentum_branch=momentum_branch,
+        pid_branch=pid_branch,
+    )
+
+    dedx = arrays["dedx"]
+    momentum = arrays["momentum"]
+    pid = arrays["pid"]
+
+    finite_mask = np.isfinite(dedx) & np.isfinite(momentum) & np.isfinite(pid)
+    dedx_mask = dedx < dedx_max
+    base_selection = finite_mask & dedx_mask
+
+    p_signed_all = momentum * np.sign(pid)
+    if analysis_momentum_range is not None:
+        range_min, range_max = sorted(analysis_momentum_range)
+        momentum_window = (p_signed_all >= range_min) & (p_signed_all <= range_max)
+        base_selection &= momentum_window
+
+    bin_edges = np.linspace(momentum_range[0], momentum_range[1], momentum_bins + 1)
+    bin_lower = bin_edges[:-1]
+    bin_upper = bin_edges[1:]
+    bin_centers = 0.5 * (bin_lower + bin_upper)
+
+    for pid_value in pids:
+        pid_target = np.isclose(np.abs(pid), float(pid_value), atol=0.5)
+        selection = base_selection & pid_target
+
+        if not np.any(selection):
+            raise DedxAnalysisError(
+                f"No entries available to build prior distribution for PID {pid_value}"
+            )
+
+        pid_momentum = p_signed_all[selection]
+        if max_events and max_events > 0 and pid_momentum.size > max_events:
+            rng = np.random.default_rng()
+            indices = rng.choice(pid_momentum.size, size=max_events, replace=False)
+            pid_momentum = pid_momentum[indices]
+
+        counts, _ = np.histogram(pid_momentum, bins=bin_edges)
+        total = counts.sum()
+        if total <= 0:
+            probabilities = np.zeros_like(counts, dtype=float)
+        else:
+            probabilities = counts.astype(float) / total
+
+        df = pd.DataFrame(
+            {
+                "momentum_bin_lower": bin_lower,
+                "momentum_bin_upper": bin_upper,
+                "momentum_center": bin_centers,
+                "count": counts,
+                "probability": probabilities,
+            }
+        )
+
+        csv_path = output_path / f"prior_{pid_value}.csv"
+        df.to_csv(csv_path, index=False)
+        results.append(
+            PriorDistributionResult(
+                pid=pid_value,
+                csv_path=csv_path.resolve(),
+            )
+        )
+
+    return results
+
+
 def evaluate_pid_bands(
     band_results: Sequence[PIDBandResult],
     *,
@@ -140,6 +255,7 @@ def evaluate_pid_bands(
     momentum_bins: int,
     output_dir: str | Path,
     figure_prefix: str,
+    prior_results: Sequence[PriorDistributionResult] | None = None,
 ) -> list[SpeciesEvaluationResult]:
     """Compare band predictions against truth and write efficiency/purity curves."""
 
@@ -176,7 +292,18 @@ def evaluate_pid_bands(
     pid_sel = pid[selection]
     p_signed = momentum_sel * np.sign(pid_sel)
 
-    score_matrix = _compute_score_matrix(p_signed, dedx_sel, species, band_models)
+    bin_edges = np.linspace(momentum_range[0], momentum_range[1], momentum_bins + 1)
+    prior_models = (
+        _load_prior_models(prior_results, bin_edges) if prior_results else {}
+    )
+
+    score_matrix = _compute_score_matrix(
+        p_signed,
+        dedx_sel,
+        species,
+        band_models,
+        prior_models if prior_models else None,
+    )
     valid_scores_mask = np.isfinite(score_matrix).any(axis=0)
 
     with np.errstate(invalid="ignore"):
@@ -191,7 +318,6 @@ def evaluate_pid_bands(
         -1,
     )
 
-    bin_edges = np.linspace(momentum_range[0], momentum_range[1], momentum_bins + 1)
     bin_indices = np.digitize(p_signed, bin_edges) - 1
     valid_bins_mask = (bin_indices >= 0) & (bin_indices < momentum_bins)
     bin_indices = np.where(valid_bins_mask, bin_indices, -1)
@@ -327,15 +453,80 @@ def _compute_score_matrix(
     dedx: np.ndarray,
     species: Sequence[int],
     band_models: dict[int, _BandModel],
+    prior_models: Optional[dict[int, _PriorDistribution]] = None,
 ) -> np.ndarray:
     scores = []
     for pid_value in species:
         model = band_models[pid_value]
         mean, sigma = model.evaluate(p_signed)
         with np.errstate(divide="ignore", invalid="ignore"):
-            score = -np.abs((dedx - mean) / sigma)
+            deviation = np.abs((dedx - mean) / sigma)
+
+        if prior_models and pid_value in prior_models:
+            prior = prior_models[pid_value].evaluate(p_signed)
+            prior = np.nan_to_num(prior, nan=0.0, posinf=0.0, neginf=0.0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                score = np.divide(
+                    prior,
+                    deviation,
+                    out=np.full_like(
+                        deviation,
+                        np.finfo(float).max,
+                        dtype=float,
+                    ),
+                    where=deviation != 0,
+                )
+        else:
+            score = -deviation
         scores.append(score)
     return np.vstack(scores)
+
+
+def _load_prior_models(
+    prior_results: Sequence[PriorDistributionResult] | None,
+    expected_bin_edges: np.ndarray,
+) -> dict[int, _PriorDistribution]:
+    if not prior_results:
+        return {}
+
+    models: dict[int, _PriorDistribution] = {}
+    for result in prior_results:
+        df = pd.read_csv(result.csv_path)
+        required_columns = {
+            "momentum_bin_lower",
+            "momentum_bin_upper",
+            "probability",
+        }
+        missing = required_columns.difference(df.columns)
+        if missing:
+            raise DedxAnalysisError(
+                f"Prior file '{result.csv_path}' missing columns: {', '.join(sorted(missing))}"
+            )
+
+        bin_lower = df["momentum_bin_lower"].to_numpy()
+        bin_upper = df["momentum_bin_upper"].to_numpy()
+        probabilities = df["probability"].to_numpy()
+
+        if bin_lower.size != probabilities.size or bin_upper.size != probabilities.size:
+            raise DedxAnalysisError(
+                f"Prior file '{result.csv_path}' has inconsistent bin definitions"
+            )
+
+        reconstructed_edges = np.concatenate(
+            (bin_lower, np.array([bin_upper[-1]], dtype=float))
+        )
+        if reconstructed_edges.size != expected_bin_edges.size or not np.allclose(
+            reconstructed_edges, expected_bin_edges
+        ):
+            raise DedxAnalysisError(
+                f"Prior file '{result.csv_path}' momentum bins do not match evaluation bins"
+            )
+
+        models[result.pid] = _PriorDistribution(
+            bin_edges=expected_bin_edges,
+            probabilities=probabilities,
+        )
+    return models
 
 
 def _accumulate_metrics(

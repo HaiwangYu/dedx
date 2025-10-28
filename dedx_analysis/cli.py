@@ -8,8 +8,10 @@ from pathlib import Path
 from .analysis import DedxAnalysisError
 from .pipeline import (
     PIDBandResult,
+    PriorDistributionResult,
     evaluate_pid_bands,
     generate_pid_bands,
+    generate_prior_distributions,
     plot_combined_bands,
 )
 
@@ -122,6 +124,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Regenerate PID bands even if outputs already exist",
     )
     parser.add_argument(
+        "--prior-distribution-dir",
+        help="Directory to store and read PID prior distributions",
+    )
+    parser.add_argument(
+        "--prior-distribution-force-gen",
+        action="store_true",
+        help="Regenerate prior distributions even if outputs already exist",
+    )
+    parser.add_argument(
         "--skip-evaluation",
         action="store_true",
         help="Skip evaluation step when running with --pid-list",
@@ -173,6 +184,15 @@ def main(argv: list[str] | None = None) -> int:
     missing_pids: list[int] = []
     cached_pids: list[int] = []
 
+    prior_results: list[PriorDistributionResult] = []
+    missing_prior_pids: list[int] = []
+    cached_prior_pids: list[int] = []
+
+    prior_dir: Path | None = None
+    if args.prior_distribution_dir:
+        prior_dir = Path(args.prior_distribution_dir)
+        prior_dir.mkdir(parents=True, exist_ok=True)
+
     for pid in pid_values:
         csv_path = band_dir / f"{args.band_prefix}_{pid}.csv"
         plot_path = band_dir / f"{args.band_prefix}_{pid}.png"
@@ -188,6 +208,23 @@ def main(argv: list[str] | None = None) -> int:
             cached_pids.append(pid)
         else:
             missing_pids.append(pid)
+
+        if prior_dir is not None:
+            prior_csv = prior_dir / f"prior_{pid}.csv"
+            if (
+                not args.prior_distribution_force_gen
+                and prior_csv.exists()
+                and prior_csv.is_file()
+            ):
+                prior_results.append(
+                    PriorDistributionResult(
+                        pid=pid,
+                        csv_path=prior_csv.resolve(),
+                    )
+                )
+                cached_prior_pids.append(pid)
+            else:
+                missing_prior_pids.append(pid)
 
     if missing_pids:
         if args.force_regenerate:
@@ -237,6 +274,47 @@ def main(argv: list[str] | None = None) -> int:
             + ", ".join(str(pid) for pid in cached_pids)
         )
 
+    if prior_dir is not None:
+        if missing_prior_pids:
+            print(
+                "Generating prior distributions for PIDs: "
+                + ", ".join(str(pid) for pid in missing_prior_pids)
+            )
+            try:
+                generated_priors = generate_prior_distributions(
+                    input_file=args.input_file,
+                    pids=missing_prior_pids,
+                    tree_name=args.tree_name,
+                    dedx_branch=args.dedx_branch,
+                    momentum_branch=args.momentum_branch,
+                    pid_branch=args.pid_branch,
+                    dedx_max=args.dedx_max,
+                    momentum_range=tuple(args.momentum_range),
+                    momentum_bins=args.momentum_bins,
+                    analysis_momentum_range=tuple(args.analysis_momentum_range),
+                    max_events=args.max_events,
+                    output_dir=prior_dir,
+                )
+            except DedxAnalysisError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+
+            prior_results.extend(generated_priors)
+            print(
+                "Prior generation complete for PIDs: "
+                + ", ".join(str(pid) for pid in missing_prior_pids)
+            )
+        else:
+            print("All requested prior distributions already exist; skipping prior generation.")
+
+        if cached_prior_pids and not args.prior_distribution_force_gen:
+            print(
+                "Using existing prior distributions for PIDs: "
+                + ", ".join(str(pid) for pid in cached_prior_pids)
+            )
+
+        prior_results.sort(key=lambda result: result.pid)
+
     if not band_results:
         print("Error: No PID band outputs are available.", file=sys.stderr)
         return 1
@@ -278,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             momentum_bins=args.momentum_bins,
             output_dir=args.evaluation_output_dir,
             figure_prefix=args.evaluation_prefix,
+            prior_results=prior_results if prior_results else None,
         )
     except DedxAnalysisError as exc:
         print(f"Error: {exc}", file=sys.stderr)
