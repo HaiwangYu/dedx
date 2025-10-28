@@ -76,12 +76,12 @@ The CLI entry point is defined in `dedx_analysis/cli.py`. Core analysis utilitie
 ```bash
 dedx-analysis \
   --input-file calotrkana-1M.root \
-  --pid-list 211 321 2212 \
+  --pid-list 211 321 2212 11 13 \
   --momentum-range 0.4 3.0 \
   --analysis-momentum-range 0.4 3.0 \
-  --band-output-dir bands-0.4-3.0-1M \
-  --prior-distribution-dir priors-0.4-3.0-1M \
+  --band-output-dir bands-5c-0.4-3.0-1M \
+  --prior-distribution-dir priors-5c-0.4-3.0-1M \
   --prior-distribution-force-gen \
-  --combined-band-plot bands-0.4-3.0-1M/dedx_bands_all.png \
-  --evaluation-output-dir evaluation-0.4-3.0-1M-prior
+  --combined-band-plot bands-5c-0.4-3.0-1M/dedx_bands_all.png \
+  --evaluation-output-dir evaluation-5c-0.4-3.0-1M-prior
 ```
