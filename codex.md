@@ -10,4 +10,4 @@ Task: consider the prior distribution of each particle distributions
 
 Followup:
 1. when prior-distribution-dir is given, draw png of the prior-distribution
-2. the prior distribution of each
+2. the prior distribution of each PID is defined as: n-particles-of-specific-PID / n-all-particles-in-that-p-bin, re-write the code on related parts

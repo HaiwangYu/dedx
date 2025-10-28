@@ -194,32 +194,41 @@ def generate_prior_distributions(
         momentum_window = (p_signed_all >= range_min) & (p_signed_all <= range_max)
         base_selection &= momentum_window
 
+    selected_indices = np.nonzero(base_selection)[0]
+    if selected_indices.size == 0:
+        raise DedxAnalysisError(
+            "No entries available after base selection to build prior distributions"
+        )
+    if max_events and max_events > 0 and selected_indices.size > max_events:
+        rng = np.random.default_rng()
+        selected_indices = rng.choice(selected_indices, size=max_events, replace=False)
+
+    selected_momentum = p_signed_all[selected_indices]
+    selected_pid = pid[selected_indices]
+
     bin_edges = np.linspace(momentum_range[0], momentum_range[1], momentum_bins + 1)
     bin_lower = bin_edges[:-1]
     bin_upper = bin_edges[1:]
     bin_centers = 0.5 * (bin_lower + bin_upper)
 
-    for pid_value in pids:
-        pid_target = np.isclose(np.abs(pid), float(pid_value), atol=0.5)
-        selection = base_selection & pid_target
+    total_counts, _ = np.histogram(selected_momentum, bins=bin_edges)
 
-        if not np.any(selection):
+    for pid_value in pids:
+        pid_target = np.isclose(np.abs(selected_pid), float(pid_value), atol=0.5)
+        if not np.any(pid_target):
             raise DedxAnalysisError(
                 f"No entries available to build prior distribution for PID {pid_value}"
             )
 
-        pid_momentum = p_signed_all[selection]
-        if max_events and max_events > 0 and pid_momentum.size > max_events:
-            rng = np.random.default_rng()
-            indices = rng.choice(pid_momentum.size, size=max_events, replace=False)
-            pid_momentum = pid_momentum[indices]
-
+        pid_momentum = selected_momentum[pid_target]
         counts, _ = np.histogram(pid_momentum, bins=bin_edges)
-        total = counts.sum()
-        if total <= 0:
-            probabilities = np.zeros_like(counts, dtype=float)
-        else:
-            probabilities = counts.astype(float) / total
+        with np.errstate(divide="ignore", invalid="ignore"):
+            probabilities = np.divide(
+                counts,
+                total_counts,
+                out=np.zeros_like(counts, dtype=float),
+                where=total_counts > 0,
+            )
 
         df = pd.DataFrame(
             {
@@ -227,6 +236,7 @@ def generate_prior_distributions(
                 "momentum_bin_upper": bin_upper,
                 "momentum_center": bin_centers,
                 "count": counts,
+                "total_count": total_counts,
                 "probability": probabilities,
             }
         )
