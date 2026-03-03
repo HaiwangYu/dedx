@@ -25,3 +25,5 @@ __pycache__/
 *.root
 bands*
 evaluation*
+*.csv
+*.png
