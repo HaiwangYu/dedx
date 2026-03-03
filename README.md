@@ -15,8 +15,7 @@ This package loads TPC dE/dx samples from ROOT files and extracts the mean and s
 Create a virtual environment and install the package in editable mode while iterating:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+source ~/venv/basic/bin/activate
 pip install -e .
 ```
 
@@ -84,6 +83,16 @@ dedx-analysis \
   --band-output-dir bands-3c-0.4-3.0-1M \
   --combined-band-plot bands-3c-0.4-3.0-1M/dedx_bands_all.png \
   --evaluation-output-dir evaluation-3c-0.4-3.0-1M
+
+dedx-analysis \
+  --input-file calotrkana-1M.root \
+  --pid-list 211 321 2212 \
+  --momentum-range 0.4 3.0 \
+  --analysis-momentum-range 0.4 3.0 \
+  --band-output-dir bands-3c-0.4-3.0-1M \
+  --prior-distribution-dir priors-3c-0.4-3.0-1M \
+  --combined-band-plot bands-3c-0.4-3.0-1M/dedx_bands_all.png \
+  --evaluation-output-dir evaluation-3c-0.4-3.0-1M-prior
 
 # 5c no-prior
 dedx-analysis \
