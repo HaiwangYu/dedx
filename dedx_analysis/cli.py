@@ -383,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
             figure_prefix=args.evaluation_prefix,
             prior_results=prior_results if prior_results else None,
             force_sigma_one=args.force_sigma_one,
+            analysis_momentum_range=tuple(args.analysis_momentum_range),
         )
     except DedxAnalysisError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -391,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Evaluation complete")
     for result in evaluation_results:
         print(f"PID {result.pid}: metrics {result.csv_path}, plot {result.plot_path}")
+        print(f"  ROC: {result.roc_csv_path}, plot {result.roc_plot_path}")
     return 0
 
 

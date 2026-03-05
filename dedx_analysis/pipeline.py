@@ -33,6 +33,8 @@ class SpeciesEvaluationResult:
     pid: int
     csv_path: Path
     plot_path: Path
+    roc_csv_path: Path
+    roc_plot_path: Path
 
 
 @dataclass(slots=True)
@@ -320,6 +322,7 @@ def evaluate_pid_bands(
     figure_prefix: str,
     prior_results: Sequence[PriorDistributionResult] | None = None,
     force_sigma_one: bool = True,
+    analysis_momentum_range: Optional[tuple[float, float]] = None,
 ) -> list[SpeciesEvaluationResult]:
     """Compare band predictions against truth and write efficiency/purity curves."""
 
@@ -383,6 +386,21 @@ def evaluate_pid_bands(
         -1,
     )
 
+    score_frac_matrix = _compute_score_frac_matrix(
+        p_signed,
+        dedx_sel,
+        species,
+        band_models,
+        prior_models if prior_models else None,
+        force_sigma_one=force_sigma_one,
+    )
+
+    if analysis_momentum_range is not None:
+        amr_min, amr_max = sorted(analysis_momentum_range)
+        analysis_mask = (p_signed >= amr_min) & (p_signed <= amr_max)
+    else:
+        analysis_mask = np.ones(p_signed.size, dtype=bool)
+
     bin_indices = np.digitize(p_signed, bin_edges) - 1
     valid_bins_mask = (bin_indices >= 0) & (bin_indices < momentum_bins)
     bin_indices = np.where(valid_bins_mask, bin_indices, -1)
@@ -393,7 +411,7 @@ def evaluate_pid_bands(
     momentum_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
     results: list[SpeciesEvaluationResult] = []
 
-    for pid_value in species:
+    for pid_idx, pid_value in enumerate(species):
         metrics_df = _accumulate_metrics(
             pid_value,
             bin_indices,
@@ -414,11 +432,35 @@ def evaluate_pid_bands(
             plot_path,
         )
 
+        thresholds, eff_roc, pur_roc = _compute_roc_curve(
+            score_frac_matrix[pid_idx],
+            pid_sel,
+            pid_value,
+            analysis_mask,
+        )
+        auc = _compute_auc(eff_roc, pur_roc)
+
+        roc_csv_path = output_path / f"{figure_prefix}_{pid_value}_roc.csv"
+        roc_plot_path = output_path / f"{figure_prefix}_{pid_value}_roc.png"
+
+        pd.DataFrame(
+            {
+                "threshold": thresholds,
+                "efficiency": eff_roc,
+                "purity": pur_roc,
+                "auc": auc,
+            }
+        ).to_csv(roc_csv_path, index=False)
+
+        _plot_roc_curve(eff_roc, pur_roc, auc, pid_value, roc_plot_path)
+
         results.append(
             SpeciesEvaluationResult(
                 pid=pid_value,
                 csv_path=csv_path.resolve(),
                 plot_path=plot_path.resolve(),
+                roc_csv_path=roc_csv_path.resolve(),
+                roc_plot_path=roc_plot_path.resolve(),
             )
         )
 
@@ -548,6 +590,100 @@ def _compute_score_matrix(
             score = -deviation
         scores.append(score)
     return np.vstack(scores)
+
+
+def _compute_score_frac_matrix(
+    p_signed: np.ndarray,
+    dedx: np.ndarray,
+    species: Sequence[int],
+    band_models: dict[int, _BandModel],
+    prior_models: Optional[dict[int, _PriorDistribution]] = None,
+    force_sigma_one: bool = True,
+) -> np.ndarray:
+    """Compute Gaussian-likelihood fractional scores, shape (n_species, n_tracks).
+
+    Each column sums to 1; values represent the fraction of total likelihood
+    attributed to each PID hypothesis.
+    """
+    likelihoods = []
+    for pid_value in species:
+        model = band_models[pid_value]
+        mean, sigma = model.evaluate(p_signed)
+        if force_sigma_one:
+            sigma = np.ones_like(sigma, dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            deviation = np.abs((dedx - mean) / sigma)
+        likelihood = np.exp(-0.5 * deviation ** 2)
+        likelihood = np.nan_to_num(likelihood, nan=0.0, posinf=0.0, neginf=0.0)
+        if prior_models and pid_value in prior_models:
+            prior = prior_models[pid_value].evaluate(p_signed)
+            prior = np.nan_to_num(prior, nan=0.0, posinf=0.0, neginf=0.0)
+            likelihood = likelihood * prior
+        likelihoods.append(likelihood)
+
+    score_matrix = np.vstack(likelihoods)  # (n_species, n_tracks)
+    total = score_matrix.sum(axis=0, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        score_frac = np.where(total > 0, score_matrix / total, 1.0 / len(species))
+    return score_frac
+
+
+def _compute_roc_curve(
+    score_frac: np.ndarray,
+    pid_truth: np.ndarray,
+    pid_value: int,
+    analysis_mask: np.ndarray,
+    n_thresholds: int = 101,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Sweep score_frac thresholds and return (thresholds, efficiency, purity).
+
+    Efficiency and purity are integrated over the tracks selected by analysis_mask.
+    """
+    truth_mask = (np.abs(pid_truth) == pid_value) & analysis_mask
+    total_truth = int(np.sum(truth_mask))
+
+    thresholds = np.linspace(0.0, 0.99, n_thresholds)
+    efficiencies = np.zeros(n_thresholds)
+    purities = np.zeros(n_thresholds)
+
+    for i, th in enumerate(thresholds):
+        pred_mask = (score_frac > th) & analysis_mask
+        correct_mask = truth_mask & pred_mask
+        total_predicted = int(np.sum(pred_mask))
+        total_correct = int(np.sum(correct_mask))
+        if total_truth > 0:
+            efficiencies[i] = total_correct / total_truth
+        if total_predicted > 0:
+            purities[i] = total_correct / total_predicted
+
+    return thresholds, efficiencies, purities
+
+
+def _compute_auc(efficiency: np.ndarray, purity: np.ndarray) -> float:
+    """Area under the efficiency-purity curve via the trapezoidal rule."""
+    order = np.argsort(purity)
+    return float(np.trapz(efficiency[order], purity[order]))
+
+
+def _plot_roc_curve(
+    efficiency: np.ndarray,
+    purity: np.ndarray,
+    auc: float,
+    pid_value: int,
+    output_path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.plot(purity, efficiency, color="tab:orange", lw=2)
+    ax.set_xlabel("Purity")
+    ax.set_ylabel("Efficiency")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.05)
+    ax.set_title(f"PID {pid_value} ROC curve  (AUC = {auc:.3f})")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path)
+    plt.close(fig)
 
 
 def _load_prior_models(
