@@ -117,3 +117,28 @@ dedx-analysis \
   --combined-band-plot bands-5c-0.4-3.0-1M/dedx_bands_all.png \
   --evaluation-output-dir evaluation-5c-0.4-3.0-1M-prior
 ```
+
+2026-03-03
+```bash
+# 3c no-prior
+
+dedx-analysis \
+  --input-file calotrkana-1M.root \
+  --pid-list 211 321 2212 \
+  --momentum-range 0.4 1.5 \
+  --analysis-momentum-range 0.4 1.5 \
+  --band-output-dir bands-3c-0.4-1.5-1M \
+  --combined-band-plot bands-3c-0.4-1.5-1M/dedx_bands_all.png \
+  --evaluation-output-dir evaluation-3c-0.4-1.5-1M-no-sigma
+
+dedx-analysis \
+  --input-file calotrkana-1M.root \
+  --pid-list 211 321 2212 \
+  --momentum-range 0.4 1.5 \
+  --analysis-momentum-range 0.4 1.5 \
+  --band-output-dir bands-3c-0.4-1.5-1M \
+  --prior-distribution-dir priors-3c-0.4-1.5-1M \
+  --prior-distribution-force-gen \
+  --combined-band-plot bands-3c-0.4-1.5-1M/dedx_bands_all.png \
+  --evaluation-output-dir evaluation-3c-0.4-1.5-1M-prior-no-sigma
+```

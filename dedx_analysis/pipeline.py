@@ -319,6 +319,7 @@ def evaluate_pid_bands(
     output_dir: str | Path,
     figure_prefix: str,
     prior_results: Sequence[PriorDistributionResult] | None = None,
+    force_sigma_one: bool = True,
 ) -> list[SpeciesEvaluationResult]:
     """Compare band predictions against truth and write efficiency/purity curves."""
 
@@ -366,6 +367,7 @@ def evaluate_pid_bands(
         species,
         band_models,
         prior_models if prior_models else None,
+        force_sigma_one=force_sigma_one,
     )
     valid_scores_mask = np.isfinite(score_matrix).any(axis=0)
 
@@ -517,11 +519,14 @@ def _compute_score_matrix(
     species: Sequence[int],
     band_models: dict[int, _BandModel],
     prior_models: Optional[dict[int, _PriorDistribution]] = None,
+    force_sigma_one: bool = True,
 ) -> np.ndarray:
     scores = []
     for pid_value in species:
         model = band_models[pid_value]
         mean, sigma = model.evaluate(p_signed)
+        if force_sigma_one:
+            sigma = np.ones_like(sigma, dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
             deviation = np.abs((dedx - mean) / sigma)
 

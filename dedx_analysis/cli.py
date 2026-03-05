@@ -169,6 +169,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Disable progress bars",
     )
+    parser.add_argument(
+        "--force-sigma-one",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Force sigma=1.0 during evaluation scoring "
+            "(enabled by default; use --no-force-sigma-one to use band sigma)"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -373,6 +382,7 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=args.evaluation_output_dir,
             figure_prefix=args.evaluation_prefix,
             prior_results=prior_results if prior_results else None,
+            force_sigma_one=args.force_sigma_one,
         )
     except DedxAnalysisError as exc:
         print(f"Error: {exc}", file=sys.stderr)
