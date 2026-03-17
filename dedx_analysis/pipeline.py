@@ -452,7 +452,7 @@ def evaluate_pid_bands(
             }
         ).to_csv(roc_csv_path, index=False)
 
-        _plot_roc_curve(eff_roc, pur_roc, auc, pid_value, roc_plot_path)
+        _plot_roc_curve(eff_roc, pur_roc, auc, pid_value, roc_plot_path, thresholds=thresholds)
 
         results.append(
             SpeciesEvaluationResult(
@@ -642,11 +642,19 @@ def _compute_roc_curve(
     truth_mask = (np.abs(pid_truth) == pid_value) & analysis_mask
     total_truth = int(np.sum(truth_mask))
 
-    thresholds = np.linspace(0.0, 0.99, n_thresholds)
+    thresholds = np.linspace(0.0, 1.0, n_thresholds)
     efficiencies = np.zeros(n_thresholds)
     purities = np.zeros(n_thresholds)
 
     for i, th in enumerate(thresholds):
+        if th == 0.0:
+            efficiencies[i] = 1.0
+            purities[i] = 0
+            continue
+        if th == 1.0:
+            efficiencies[i] = 0
+            purities[i] = 1.0
+            continue
         pred_mask = (score_frac > th) & analysis_mask
         correct_mask = truth_mask & pred_mask
         total_predicted = int(np.sum(pred_mask))
@@ -671,9 +679,15 @@ def _plot_roc_curve(
     auc: float,
     pid_value: int,
     output_path: Path,
+    thresholds: Optional[np.ndarray] = None,
 ) -> None:
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(purity, efficiency, color="tab:orange", lw=2)
+    if thresholds is not None:
+        sc = ax.scatter(purity, efficiency, c=thresholds, cmap="viridis", s=20, zorder=3)
+        cbar = fig.colorbar(sc, ax=ax)
+        cbar.set_label("score_frac threshold")
+    else:
+        ax.scatter(purity, efficiency, s=20, zorder=3)
     ax.set_xlabel("Purity")
     ax.set_ylabel("Efficiency")
     ax.set_xlim(0.0, 1.0)
