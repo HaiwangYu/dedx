@@ -668,17 +668,22 @@ def _compute_roc_curve(
     pid_truth: np.ndarray,
     pid_value: int,
     analysis_mask: np.ndarray,
+    max_thresholds: int = 1000,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Sweep score_frac thresholds and return (thresholds, efficiency, purity).
 
-    Thresholds are the sorted unique score values within analysis_mask, giving
-    one exact operating point per track rather than a fixed grid.
+    Thresholds are sampled from the sorted unique score values within
+    analysis_mask (at most max_thresholds points), giving smooth curves
+    without a fixed-grid staircase effect.
     Efficiency and purity are integrated over the tracks selected by analysis_mask.
     """
     truth_mask = (np.abs(pid_truth) == pid_value) & analysis_mask
     total_truth = int(np.sum(truth_mask))
 
     unique_scores = np.unique(score_frac[analysis_mask])
+    if len(unique_scores) > max_thresholds:
+        idx = np.linspace(0, len(unique_scores) - 1, max_thresholds, dtype=int)
+        unique_scores = unique_scores[idx]
     thresholds = np.concatenate([[0.0], unique_scores, [1.0]])
     n = len(thresholds)
     efficiencies = np.zeros(n)
