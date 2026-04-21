@@ -162,5 +162,16 @@ dedx-analysis \
   --band-output-dir bands-3c-0.5-2.0-1M \
   --combined-band-plot bands-3c-0.5-2.0-1M/dedx_bands_all.png \
   --roc-momentum-bins 0.5 2.0 0.5 \
+  --evaluation-output-dir evaluation-3c-0.5-2.0-1M-no-sigma-roc
+
+dedx-analysis \
+  --input-file calotrkana-1M.root \
+  --pid-list 211 321 2212 \
+  --momentum-range 0.5 2.0 \
+  --analysis-momentum-range 0.5 2.0 \
+  --band-output-dir bands-3c-0.5-2.0-1M \
+  --prior-distribution-dir priors-3c-0.5-2.0-1M \
+  --combined-band-plot bands-3c-0.5-2.0-1M/dedx_bands_all.png \
+  --roc-momentum-bins 0.5 2.0 0.5 \
   --evaluation-output-dir evaluation-3c-0.5-2.0-1M-prior-no-sigma-roc
 ```

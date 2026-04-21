@@ -332,6 +332,23 @@ def evaluate_pid_bands(
 ) -> list[SpeciesEvaluationResult]:
     """Compare band predictions against truth and write efficiency/purity curves."""
 
+    print("evaluate_pid_bands parameters:")
+    print(f"  evaluation_file:         {evaluation_file}")
+    print(f"  tree_name:               {tree_name}")
+    print(f"  dedx_branch:             {dedx_branch}")
+    print(f"  momentum_branch:         {momentum_branch}")
+    print(f"  pid_branch:              {pid_branch}")
+    print(f"  dedx_max:                {dedx_max}")
+    print(f"  momentum_range:          {momentum_range}")
+    print(f"  momentum_bins:           {momentum_bins}")
+    print(f"  output_dir:              {output_dir}")
+    print(f"  figure_prefix:           {figure_prefix}")
+    print(f"  force_sigma_one:         {force_sigma_one}")
+    print(f"  analysis_momentum_range: {analysis_momentum_range}")
+    print(f"  roc_momentum_bins:       {roc_momentum_bins}")
+    print(f"  prior_results:           {[r.pid for r in prior_results] if prior_results else None}")
+    print(f"  band_results (PIDs):     {[r.pid for r in band_results]}")
+
     if not band_results:
         raise DedxAnalysisError("No band results provided for evaluation")
 
@@ -607,22 +624,17 @@ def _compute_score_matrix(
         with np.errstate(divide="ignore", invalid="ignore"):
             deviation = np.abs((dedx - mean) / sigma)
 
+        # likelihood = np.exp(-0.5 * deviation ** 2)
+        likelihood = 1./deviation
+        likelihood = np.nan_to_num(likelihood, nan=0.0, posinf=0.0, neginf=0.0)
+        # print(f"_compute_score_matrix bf prior likelihood for PID {pid_value}: {likelihood}")
         if prior_models and pid_value in prior_models:
             prior = prior_models[pid_value].evaluate(p_signed)
             prior = np.nan_to_num(prior, nan=0.0, posinf=0.0, neginf=0.0)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                score = np.divide(
-                    prior,
-                    deviation,
-                    out=np.full_like(
-                        deviation,
-                        np.finfo(float).max,
-                        dtype=float,
-                    ),
-                    where=deviation != 0,
-                )
+            score = likelihood * prior
         else:
-            score = -deviation
+            score = likelihood
+        # print(f"_compute_score_matrix af prior likelihood for PID {pid_value}: {score}")
         scores.append(score)
     return np.vstack(scores)
 
@@ -648,13 +660,16 @@ def _compute_score_frac_matrix(
             sigma = np.ones_like(sigma, dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
             deviation = np.abs((dedx - mean) / sigma)
-        likelihood = np.exp(-0.5 * deviation ** 2)
+        # likelihood = np.exp(-0.5 * deviation ** 2)
+        likelihood = 1./deviation
         likelihood = np.nan_to_num(likelihood, nan=0.0, posinf=0.0, neginf=0.0)
+        # print(f"_compute_score_frac_matrix bf prior likelihood for PID {pid_value}: {likelihood}")
         if prior_models and pid_value in prior_models:
             prior = prior_models[pid_value].evaluate(p_signed)
             prior = np.nan_to_num(prior, nan=0.0, posinf=0.0, neginf=0.0)
             likelihood = likelihood * prior
         likelihoods.append(likelihood)
+        # print(f"_compute_score_frac_matrix af prior likelihood for PID {pid_value}: {likelihood}")
 
     score_matrix = np.vstack(likelihoods)  # (n_species, n_tracks)
     total = score_matrix.sum(axis=0, keepdims=True)
