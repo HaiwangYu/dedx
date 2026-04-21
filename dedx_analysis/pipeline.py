@@ -719,8 +719,7 @@ def _compute_roc_curve(
         total_correct = int(np.sum(correct_mask))
         if total_truth > 0:
             efficiencies[i] = total_correct / total_truth
-        if total_predicted > 0:
-            purities[i] = total_correct / total_predicted
+        purities[i] = total_correct / total_predicted if total_predicted > 0 else 1.0
 
     return thresholds, efficiencies, purities
 
