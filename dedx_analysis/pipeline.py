@@ -680,7 +680,7 @@ def _compute_roc_curve(
     truth_mask = (np.abs(pid_truth) == pid_value) & analysis_mask
     total_truth = int(np.sum(truth_mask))
 
-    unique_scores = np.unique(score_frac[analysis_mask])
+    unique_scores = np.unique(score_frac)
     if len(unique_scores) > max_thresholds:
         idx = np.linspace(0, len(unique_scores) - 1, max_thresholds, dtype=int)
         unique_scores = unique_scores[idx]
