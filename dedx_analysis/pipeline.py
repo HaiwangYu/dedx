@@ -455,13 +455,13 @@ def evaluate_pid_bands(
             plot_path,
         )
 
-        thresholds, eff_roc, pur_roc = _compute_roc_curve(
+        thresholds, tpr_roc, fpr_roc = _compute_roc_curve(
             score_frac_matrix[pid_idx],
             pid_sel,
             pid_value,
             analysis_mask,
         )
-        auc = _compute_auc(eff_roc, pur_roc)
+        auc = _compute_auc(tpr_roc, fpr_roc)
 
         roc_csv_path = output_path / f"{figure_prefix}_{pid_value}_roc.csv"
         roc_plot_path = output_path / f"{figure_prefix}_{pid_value}_roc.png"
@@ -469,13 +469,13 @@ def evaluate_pid_bands(
         pd.DataFrame(
             {
                 "threshold": thresholds,
-                "efficiency": eff_roc,
-                "purity": pur_roc,
+                "tpr": tpr_roc,
+                "fpr": fpr_roc,
                 "auc": auc,
             }
         ).to_csv(roc_csv_path, index=False)
 
-        _plot_roc_curve(eff_roc, pur_roc, auc, pid_value, roc_plot_path, thresholds=thresholds)
+        _plot_roc_curve(tpr_roc, fpr_roc, auc, pid_value, roc_plot_path, thresholds=thresholds)
 
         roc_bin_csv_paths: list[Path] = []
         roc_bin_plot_path: Optional[Path] = None
@@ -488,17 +488,17 @@ def evaluate_pid_bands(
             roc_bin_data: list[tuple[np.ndarray, np.ndarray, float, str]] = []
             for lo, hi in sub_ranges:
                 bin_mask = (p_signed >= lo) & (p_signed < hi)
-                th_b, eff_b, pur_b = _compute_roc_curve(
+                th_b, tpr_b, fpr_b = _compute_roc_curve(
                     score_frac_matrix[pid_idx], pid_sel, pid_value, bin_mask
                 )
-                auc_b = _compute_auc(eff_b, pur_b)
+                auc_b = _compute_auc(tpr_b, fpr_b)
                 label = f"p \u2208 [{lo:.1f}, {hi:.1f})"
                 bin_csv = output_path / f"{figure_prefix}_{pid_value}_roc_{lo:.1f}_{hi:.1f}.csv"
                 pd.DataFrame(
-                    {"threshold": th_b, "efficiency": eff_b, "purity": pur_b, "auc": auc_b}
+                    {"threshold": th_b, "tpr": tpr_b, "fpr": fpr_b, "auc": auc_b}
                 ).to_csv(bin_csv, index=False)
                 roc_bin_csv_paths.append(bin_csv.resolve())
-                roc_bin_data.append((eff_b, pur_b, auc_b, label))
+                roc_bin_data.append((tpr_b, fpr_b, auc_b, label))
 
             _roc_bin_plot = output_path / f"{figure_prefix}_{pid_value}_roc_bins.png"
             _plot_roc_curves_multi(roc_bin_data, pid_value, _roc_bin_plot)
@@ -685,15 +685,17 @@ def _compute_roc_curve(
     analysis_mask: np.ndarray,
     max_thresholds: int = 1000,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Sweep score_frac thresholds and return (thresholds, efficiency, purity).
+    """Sweep score_frac thresholds and return (thresholds, tpr, fpr).
 
-    Thresholds are sampled from the sorted unique score values within
-    analysis_mask (at most max_thresholds points), giving smooth curves
-    without a fixed-grid staircase effect.
-    Efficiency and purity are integrated over the tracks selected by analysis_mask.
+    Thresholds are sampled from the sorted unique score values
+    (at most max_thresholds points), giving smooth curves without a
+    fixed-grid staircase effect.
+    TPR and FPR are computed over tracks selected by analysis_mask.
     """
     truth_mask = (np.abs(pid_truth) == pid_value) & analysis_mask
     total_truth = int(np.sum(truth_mask))
+    total_analysis = int(np.sum(analysis_mask))
+    total_negative = total_analysis - total_truth
 
     unique_scores = np.unique(score_frac)
     if len(unique_scores) > max_thresholds:
@@ -701,38 +703,39 @@ def _compute_roc_curve(
         unique_scores = unique_scores[idx]
     thresholds = np.concatenate([[0.0], unique_scores, [1.0]])
     n = len(thresholds)
-    efficiencies = np.zeros(n)
-    purities = np.zeros(n)
+    tpr_values = np.zeros(n)
+    fpr_values = np.zeros(n)
 
     for i, th in enumerate(thresholds):
         if th == 0.0:
-            efficiencies[i] = 1.0
-            purities[i] = 0.0
+            tpr_values[i] = 1.0
+            fpr_values[i] = 1.0
             continue
         if th == 1.0:
-            efficiencies[i] = 0.0
-            purities[i] = 1.0
+            tpr_values[i] = 0.0
+            fpr_values[i] = 0.0
             continue
         pred_mask = (score_frac > th) & analysis_mask
         correct_mask = truth_mask & pred_mask
         total_predicted = int(np.sum(pred_mask))
         total_correct = int(np.sum(correct_mask))
         if total_truth > 0:
-            efficiencies[i] = total_correct / total_truth
-        purities[i] = total_correct / total_predicted if total_predicted > 0 else 1.0
+            tpr_values[i] = total_correct / total_truth
+        if total_negative > 0:
+            fpr_values[i] = (total_predicted - total_correct) / total_negative
 
-    return thresholds, efficiencies, purities
+    return thresholds, tpr_values, fpr_values
 
 
-def _compute_auc(efficiency: np.ndarray, purity: np.ndarray) -> float:
-    """Area under the efficiency-purity curve via the trapezoidal rule."""
-    order = np.argsort(purity)
-    return float(np.trapz(efficiency[order], purity[order]))
+def _compute_auc(tpr: np.ndarray, fpr: np.ndarray) -> float:
+    """Area under the TPR-FPR ROC curve via the trapezoidal rule."""
+    order = np.argsort(fpr)
+    return float(np.trapz(tpr[order], fpr[order]))
 
 
 def _plot_roc_curve(
-    efficiency: np.ndarray,
-    purity: np.ndarray,
+    tpr: np.ndarray,
+    fpr: np.ndarray,
     auc: float,
     pid_value: int,
     output_path: Path,
@@ -740,13 +743,13 @@ def _plot_roc_curve(
 ) -> None:
     fig, ax = plt.subplots(figsize=(6, 5))
     if thresholds is not None:
-        sc = ax.scatter(purity, efficiency, c=thresholds, cmap="viridis", s=20, zorder=3)
+        sc = ax.scatter(fpr, tpr, c=thresholds, cmap="viridis", s=20, zorder=3)
         cbar = fig.colorbar(sc, ax=ax)
         cbar.set_label("score_frac threshold")
     else:
-        ax.scatter(purity, efficiency, s=20, zorder=3)
-    ax.set_xlabel("Purity")
-    ax.set_ylabel("Efficiency")
+        ax.scatter(fpr, tpr, s=20, zorder=3)
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
     ax.set_xlim(0.0, 1.0)
     ax.set_ylim(0.0, 1.05)
     ax.set_title(f"PID {pid_value} ROC curve  (AUC = {auc:.3f})")
@@ -764,10 +767,10 @@ def _plot_roc_curves_multi(
 ) -> None:
     fig, ax = plt.subplots(figsize=(7, 6))
     colors = plt.cm.tab10(np.linspace(0, 0.9, len(roc_data)))
-    for (eff, pur, auc, label), color in zip(roc_data, colors):
-        ax.plot(pur, eff, label=f"{label}  AUC={auc:.3f}", color=color, linewidth=1.5)
-    ax.set_xlabel("Purity")
-    ax.set_ylabel("Efficiency")
+    for (tpr, fpr, auc, label), color in zip(roc_data, colors):
+        ax.plot(fpr, tpr, label=f"{label}  AUC={auc:.3f}", color=color, linewidth=1.5)
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
     ax.set_xlim(0.0, 1.0)
     ax.set_ylim(0.0, 1.05)
     ax.set_title(f"PID {pid_value} ROC curves by momentum bin")
