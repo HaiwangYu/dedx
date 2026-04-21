@@ -1,7 +1,7 @@
 """Pipeline helpers for running multi-PID dE/dx analysis and evaluations."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -35,6 +35,8 @@ class SpeciesEvaluationResult:
     plot_path: Path
     roc_csv_path: Path
     roc_plot_path: Path
+    roc_bin_csv_paths: list[Path] = field(default_factory=list)
+    roc_bin_plot_path: Optional[Path] = None
 
 
 @dataclass(slots=True)
@@ -56,20 +58,23 @@ class _BandModel:
         self._sigma = np.where(sigma[order] > 0, sigma[order], np.nan)
 
     def evaluate(self, momentum_values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        mean = np.interp(
-            momentum_values,
-            self._momentum,
-            self._mean,
-            left=np.nan,
-            right=np.nan,
-        )
-        sigma = np.interp(
-            momentum_values,
-            self._momentum,
-            self._sigma,
-            left=np.nan,
-            right=np.nan,
-        )
+        mean = np.interp(momentum_values, self._momentum, self._mean)
+        sigma = np.interp(momentum_values, self._momentum, self._sigma)
+
+        lo, hi = self._momentum[0], self._momentum[-1]
+
+        left_mask = momentum_values < lo
+        if np.any(left_mask):
+            dm = self._momentum[1] - self._momentum[0]
+            mean[left_mask] = self._mean[0] + (self._mean[1] - self._mean[0]) / dm * (momentum_values[left_mask] - lo)
+            sigma[left_mask] = self._sigma[0] + (self._sigma[1] - self._sigma[0]) / dm * (momentum_values[left_mask] - lo)
+
+        right_mask = momentum_values > hi
+        if np.any(right_mask):
+            dm = self._momentum[-1] - self._momentum[-2]
+            mean[right_mask] = self._mean[-1] + (self._mean[-1] - self._mean[-2]) / dm * (momentum_values[right_mask] - hi)
+            sigma[right_mask] = self._sigma[-1] + (self._sigma[-1] - self._sigma[-2]) / dm * (momentum_values[right_mask] - hi)
+
         sigma = np.where(sigma > 0, sigma, np.nan)
         return mean, sigma
 
@@ -323,6 +328,7 @@ def evaluate_pid_bands(
     prior_results: Sequence[PriorDistributionResult] | None = None,
     force_sigma_one: bool = True,
     analysis_momentum_range: Optional[tuple[float, float]] = None,
+    roc_momentum_bins: Optional[tuple[float, float, float]] = None,
 ) -> list[SpeciesEvaluationResult]:
     """Compare band predictions against truth and write efficiency/purity curves."""
 
@@ -454,6 +460,33 @@ def evaluate_pid_bands(
 
         _plot_roc_curve(eff_roc, pur_roc, auc, pid_value, roc_plot_path, thresholds=thresholds)
 
+        roc_bin_csv_paths: list[Path] = []
+        roc_bin_plot_path: Optional[Path] = None
+
+        if roc_momentum_bins is not None:
+            start, stop, step = roc_momentum_bins
+            edges = np.arange(start, stop + step * 0.5, step)
+            sub_ranges = [(float(edges[i]), float(edges[i + 1])) for i in range(len(edges) - 1)]
+
+            roc_bin_data: list[tuple[np.ndarray, np.ndarray, float, str]] = []
+            for lo, hi in sub_ranges:
+                bin_mask = (p_signed >= lo) & (p_signed < hi)
+                th_b, eff_b, pur_b = _compute_roc_curve(
+                    score_frac_matrix[pid_idx], pid_sel, pid_value, bin_mask
+                )
+                auc_b = _compute_auc(eff_b, pur_b)
+                label = f"p \u2208 [{lo:.1f}, {hi:.1f})"
+                bin_csv = output_path / f"{figure_prefix}_{pid_value}_roc_{lo:.1f}_{hi:.1f}.csv"
+                pd.DataFrame(
+                    {"threshold": th_b, "efficiency": eff_b, "purity": pur_b, "auc": auc_b}
+                ).to_csv(bin_csv, index=False)
+                roc_bin_csv_paths.append(bin_csv.resolve())
+                roc_bin_data.append((eff_b, pur_b, auc_b, label))
+
+            _roc_bin_plot = output_path / f"{figure_prefix}_{pid_value}_roc_bins.png"
+            _plot_roc_curves_multi(roc_bin_data, pid_value, _roc_bin_plot)
+            roc_bin_plot_path = _roc_bin_plot.resolve()
+
         results.append(
             SpeciesEvaluationResult(
                 pid=pid_value,
@@ -461,6 +494,8 @@ def evaluate_pid_bands(
                 plot_path=plot_path.resolve(),
                 roc_csv_path=roc_csv_path.resolve(),
                 roc_plot_path=roc_plot_path.resolve(),
+                roc_bin_csv_paths=roc_bin_csv_paths,
+                roc_bin_plot_path=roc_bin_plot_path,
             )
         )
 
@@ -693,6 +728,28 @@ def _plot_roc_curve(
     ax.set_xlim(0.0, 1.0)
     ax.set_ylim(0.0, 1.05)
     ax.set_title(f"PID {pid_value} ROC curve  (AUC = {auc:.3f})")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path)
+    plt.close(fig)
+
+
+def _plot_roc_curves_multi(
+    roc_data: list[tuple[np.ndarray, np.ndarray, float, str]],
+    pid_value: int,
+    output_path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(7, 6))
+    colors = plt.cm.tab10(np.linspace(0, 0.9, len(roc_data)))
+    for (eff, pur, auc, label), color in zip(roc_data, colors):
+        ax.plot(pur, eff, label=f"{label}  AUC={auc:.3f}", color=color, linewidth=1.5)
+    ax.set_xlabel("Purity")
+    ax.set_ylabel("Efficiency")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.05)
+    ax.set_title(f"PID {pid_value} ROC curves by momentum bin")
+    ax.legend(loc="lower left", fontsize=9)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)

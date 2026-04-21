@@ -178,6 +178,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "(enabled by default; use --no-force-sigma-one to use band sigma)"
         ),
     )
+    parser.add_argument(
+        "--roc-momentum-bins",
+        nargs=3,
+        type=float,
+        metavar=("START", "STOP", "STEP"),
+        default=None,
+        help=(
+            "Generate per-bin ROC curves from START to STOP with STEP width (GeV/c), "
+            "e.g. --roc-momentum-bins 0.5 2.0 0.5"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -186,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sample_size = args.sample_size if args.sample_size and args.sample_size > 0 else None
     pid_values = [abs(pid) for pid in args.pid_list]
+    roc_momentum_bins = tuple(args.roc_momentum_bins) if args.roc_momentum_bins else None
 
     band_dir = Path(args.band_output_dir)
     band_dir.mkdir(parents=True, exist_ok=True)
@@ -384,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
             prior_results=prior_results if prior_results else None,
             force_sigma_one=args.force_sigma_one,
             analysis_momentum_range=tuple(args.analysis_momentum_range),
+            roc_momentum_bins=roc_momentum_bins,
         )
     except DedxAnalysisError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -393,6 +406,10 @@ def main(argv: list[str] | None = None) -> int:
     for result in evaluation_results:
         print(f"PID {result.pid}: metrics {result.csv_path}, plot {result.plot_path}")
         print(f"  ROC: {result.roc_csv_path}, plot {result.roc_plot_path}")
+        if result.roc_bin_plot_path:
+            print(f"  ROC bins: {result.roc_bin_plot_path}")
+            for p in result.roc_bin_csv_paths:
+                print(f"    {p}")
     return 0
 
 
