@@ -668,26 +668,29 @@ def _compute_roc_curve(
     pid_truth: np.ndarray,
     pid_value: int,
     analysis_mask: np.ndarray,
-    n_thresholds: int = 101,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Sweep score_frac thresholds and return (thresholds, efficiency, purity).
 
+    Thresholds are the sorted unique score values within analysis_mask, giving
+    one exact operating point per track rather than a fixed grid.
     Efficiency and purity are integrated over the tracks selected by analysis_mask.
     """
     truth_mask = (np.abs(pid_truth) == pid_value) & analysis_mask
     total_truth = int(np.sum(truth_mask))
 
-    thresholds = np.linspace(0.0, 1.0, n_thresholds)
-    efficiencies = np.zeros(n_thresholds)
-    purities = np.zeros(n_thresholds)
+    unique_scores = np.unique(score_frac[analysis_mask])
+    thresholds = np.concatenate([[0.0], unique_scores, [1.0]])
+    n = len(thresholds)
+    efficiencies = np.zeros(n)
+    purities = np.zeros(n)
 
     for i, th in enumerate(thresholds):
         if th == 0.0:
             efficiencies[i] = 1.0
-            purities[i] = 0
+            purities[i] = 0.0
             continue
         if th == 1.0:
-            efficiencies[i] = 0
+            efficiencies[i] = 0.0
             purities[i] = 1.0
             continue
         pred_mask = (score_frac > th) & analysis_mask
