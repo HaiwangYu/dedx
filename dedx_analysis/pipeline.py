@@ -730,7 +730,7 @@ def _compute_roc_curve(
 def _compute_auc(tpr: np.ndarray, fpr: np.ndarray) -> float:
     """Area under the TPR-FPR ROC curve via the trapezoidal rule."""
     order = np.argsort(fpr)
-    return float(np.trapz(tpr[order], fpr[order]))
+    return float(np.trapezoid(tpr[order], fpr[order]))
 
 
 def _plot_roc_curve(
@@ -748,6 +748,7 @@ def _plot_roc_curve(
         cbar.set_label("score_frac threshold")
     else:
         ax.scatter(fpr, tpr, s=20, zorder=3)
+    ax.plot([0, 1], [0, 1], color="gray", linestyle="--", linewidth=1.0, label="random")
     ax.set_xlabel("False Positive Rate")
     ax.set_ylabel("True Positive Rate")
     ax.set_xlim(0.0, 1.0)
@@ -769,6 +770,7 @@ def _plot_roc_curves_multi(
     colors = plt.cm.tab10(np.linspace(0, 0.9, len(roc_data)))
     for (tpr, fpr, auc, label), color in zip(roc_data, colors):
         ax.plot(fpr, tpr, label=f"{label}  AUC={auc:.3f}", color=color, linewidth=1.5)
+    ax.plot([0, 1], [0, 1], color="gray", linestyle="--", linewidth=1.0, label="random")
     ax.set_xlabel("False Positive Rate")
     ax.set_ylabel("True Positive Rate")
     ax.set_xlim(0.0, 1.0)

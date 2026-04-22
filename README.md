@@ -167,6 +167,16 @@ dedx-analysis \
 dedx-analysis \
   --input-file calotrkana-1M.root \
   --pid-list 211 321 2212 \
+  --momentum-range 0.5 4.0 \
+  --analysis-momentum-range 0.5 4.0 \
+  --band-output-dir bands-3c-0.5-4.0-1M \
+  --combined-band-plot bands-3c-0.5-4.0-1M/dedx_bands_all.png \
+  --roc-momentum-bins 0.0 4.0 1.0 \
+  --evaluation-output-dir evaluation-3c-0.5-4.0-1M-no-sigma-roc-0.0-4.0-1.0
+
+dedx-analysis \
+  --input-file calotrkana-1M.root \
+  --pid-list 211 321 2212 \
   --momentum-range 0.5 2.0 \
   --analysis-momentum-range 0.5 2.0 \
   --band-output-dir bands-3c-0.5-2.0-1M \
