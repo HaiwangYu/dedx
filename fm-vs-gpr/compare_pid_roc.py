@@ -287,8 +287,17 @@ def main():
         fm_df = pd.read_csv(fm_cache)
 
     # --- plot ---------------------------------------------------------------
+    # Paper-sized fonts: ~ body-text size relative to the figure.
+    plt.rcParams.update({
+        "font.size": 20,
+        "axes.titlesize": 22,
+        "axes.labelsize": 22,
+        "xtick.labelsize": 18,
+        "ytick.labelsize": 18,
+        "legend.fontsize": 19,
+    })
     lo, hi = args.bin_lo, args.bin_hi
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2), dpi=150)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5.0), dpi=150)
     summary = []
     for ax, sp in zip(axes, SPECIES):
         fpr_g, tpr_g, auc_g, npos_g, ntot_g = roc_for_bin(
@@ -297,27 +306,25 @@ def main():
         fpr_f, tpr_f, auc_f, npos_f, ntot_f = roc_for_bin(
             fm_df, f"score_{sp}", "gt_pid_class", cls, lo, hi)
 
-        ax.plot([0, 1], [0, 1], "k--", lw=1, alpha=0.5, label="Random")
-        ax.plot(fpr_f, tpr_f, color="tab:blue", lw=2.2,
+        ax.plot([0, 1], [0, 1], "k--", lw=1.5, alpha=0.5, label="Random")
+        ax.plot(fpr_f, tpr_f, color="tab:blue", lw=2.6,
                 label=f"FM  AUC={auc_f:.3f}")
-        ax.plot(fpr_g, tpr_g, color="tab:red", lw=2.2,
+        ax.plot(fpr_g, tpr_g, color="tab:red", lw=2.6,
                 label=f"GPR AUC={auc_g:.3f}")
-        ax.set_title(f"{SPECIES_NAME[sp]} one-vs-rest "
-                     f"(N$_{{sig}}$={npos_g}/{npos_f})", fontsize=12)
+        ax.set_title(f"{SPECIES_NAME[sp]} one-vs-rest")
         ax.set_xlabel("False Positive Rate")
-        ax.set_ylabel("True Positive Rate")
+        if ax is axes[0]:
+            ax.set_ylabel("True Positive Rate")
         ax.set_xlim(0, 1); ax.set_ylim(0, 1.02)
         ax.grid(alpha=0.3)
-        ax.legend(loc="lower right", fontsize=10)
+        ax.legend(loc="lower right", fontsize=14, handlelength=1.4,
+                  borderpad=0.3, labelspacing=0.3, framealpha=0.85)
         summary += [
             dict(species=sp, method="FM", auc=auc_f, n_sig=npos_f, n_tot=ntot_f),
             dict(species=sp, method="GPR", auc=auc_g, n_sig=npos_g, n_tot=ntot_g),
         ]
 
-    fig.suptitle(
-        f"PID capability: FM vs GPR dE/dx  |  p $\\in$ [{lo}, {hi}) GeV/c"
-        f"  (pi/K/p, charge-folded)", fontsize=14)
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout(pad=0.4, w_pad=0.6)
     png = os.path.join(args.outdir, f"pid_roc_comparison_{lo}_{hi}.png")
     pdf = os.path.join(args.outdir, f"pid_roc_comparison_{lo}_{hi}.pdf")
     fig.savefig(png, bbox_inches="tight")

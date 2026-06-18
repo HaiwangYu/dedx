@@ -8,9 +8,15 @@ curve** of two PID methods in a single momentum bin (default **0.8–1.2 GeV/c**
 - **FM** — Shuhang's foundation model, per-point PID probabilities aggregated to
   track level.
 
-Output: `pid_roc_comparison_0.8_1.2.{png,pdf}` and `auc_summary_0.8_1.2.csv`.
+Output (one set per momentum bin): `pid_roc_comparison_<lo>_<hi>.{png,pdf}` and
+`auc_summary_<lo>_<hi>.csv`. Generated bins: **0.8–1.2**, **0.0–1.0**, **1.0–2.0** GeV/c.
 
 ![comparison](pid_roc_comparison_0.8_1.2.png)
+
+> **GPR is always fit over 0.5–2.0 GeV/c** (one band set, reused for every bin).
+> In the **0.0–1.0** bin most tracks sit below 0.5 GeV/c, where the GPR band is
+> *extrapolated* — its AUC there reflects out-of-fit-range behavior, not low-p
+> dE/dx capability. The 1.0–2.0 bin is fully inside the fit range.
 
 ## Result (p ∈ [0.8, 1.2) GeV/c, 1M ROOT / FM eval set)
 
