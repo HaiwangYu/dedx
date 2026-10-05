@@ -99,4 +99,7 @@ $PY fm-vs-gpr/seed_purity_study.py --outdir fm-vs-gpr-2026-10-05-seed-purity
 - `seed_purity_distribution.png`, `auc_vs_purity_{0.8_1.2,1.0_2.0}.png`, `auc_vs_purity.csv`
 - `auc_by_origin.csv`, `species_mix_by_origin.csv`, `fm_skipped_clusters.csv`
 - `purity_ge_{0.5,0.9}/` — same-seed ROC plots and AUC tables after the purity cut
+- `origin_{primary,secondary}/` — same-seed ROC plots and AUC tables per origin of the top
+  truth track; `origin_primary/pid_roc_comparison_0.8_1.2.pdf` is the paper's PID figure
+  (`paper-draft/figures/pid_roc_0.8_1.2.pdf`)
 - `seed_purity_scores.csv` — per-seed scores + purity (large-ish; not for git)

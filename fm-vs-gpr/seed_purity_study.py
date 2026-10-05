@@ -11,7 +11,7 @@ Uses the seed selection and both scores from compare_same_seeds.py, then:
   * AUC vs purity bin for both methods (Hanley-McNeil standard errors),
   * same-seed ROC plots restricted to purity >= each --purity-cuts value,
   * AUC split by the origin of the seed's top truth track (primary id>0 vs
-    secondary id<0), and the species mix of each,
+    secondary id<0), the species mix of each, and same-seed ROC plots per origin,
   * a breakdown of which TPC clusters FM did not score.
 """
 
@@ -73,6 +73,18 @@ def auc_se(auc, n_pos, n_neg):
     q1, q2 = auc / (2 - auc), 2 * auc * auc / (1 + auc)
     return float(np.sqrt((auc * (1 - auc) + (n_pos - 1) * (q1 - auc ** 2)
                           + (n_neg - 1) * (q2 - auc ** 2)) / (n_pos * n_neg)))
+
+
+def plot_subset(sub, outdir, bins):
+    """Same-seed ROC plots (plot_comparison) for a subset of the seed table."""
+    os.makedirs(outdir, exist_ok=True)
+    gpr_df = pd.DataFrame({"p": sub.p, "apid": sub.apid,
+                           **{f"score_{sp}": sub[f"gpr_score_{sp}"] for sp in SPECIES}})
+    fm_df = pd.DataFrame({"p": sub.p, "gt_pid_class": sub.apid.map({211: 1, 321: 2, 2212: 3}),
+                          **{f"score_{sp}": sub[f"fm_score_{sp}"] for sp in SPECIES}})
+    for b in bins.split(";"):
+        lo, hi = (float(x) for x in b.split(","))
+        plot_comparison(gpr_df, fm_df, lo, hi, outdir)
 
 
 def fm_skipped_breakdown(merged_dir, segments):
@@ -175,16 +187,8 @@ def main():
     # --- same-seed ROC restricted to purity >= cut -----------------------------
     for cut in [float(x) for x in args.purity_cuts.split(",")]:
         sub = seeds[seeds.purity >= cut]
-        od = os.path.join(args.outdir, f"purity_ge_{cut}")
-        os.makedirs(od, exist_ok=True)
-        gpr_df = pd.DataFrame({"p": sub.p, "apid": sub.apid,
-                               **{f"score_{sp}": sub[f"gpr_score_{sp}"] for sp in SPECIES}})
-        fm_df = pd.DataFrame({"p": sub.p, "gt_pid_class": sub.apid.map({211: 1, 321: 2, 2212: 3}),
-                              **{f"score_{sp}": sub[f"fm_score_{sp}"] for sp in SPECIES}})
         print(f"\n##### purity >= {cut}: {len(sub):,}/{len(seeds):,} seeds")
-        for b in args.bins.split(";"):
-            lo, hi = (float(x) for x in b.split(","))
-            plot_comparison(gpr_df, fm_df, lo, hi, od)
+        plot_subset(sub, os.path.join(args.outdir, f"purity_ge_{cut}"), args.bins)
 
     # --- AUC by origin of the top truth track (primary vs secondary) ------------
     seeds["origin"] = np.where(seeds.top_trkid > 0, "primary", "secondary")
@@ -210,6 +214,10 @@ def main():
     mix = pd.crosstab(seeds.origin[m], seeds.apid[m], normalize="index")
     mix.to_csv(os.path.join(args.outdir, "species_mix_by_origin.csv"))
     print("\n[species mix by origin, p in [0.5, 2)]\n" + mix.round(3).to_string())
+    for org in ["primary", "secondary"]:
+        sub = seeds[seeds.origin == org]
+        print(f"\n##### origin = {org}: {len(sub):,}/{len(seeds):,} seeds")
+        plot_subset(sub, os.path.join(args.outdir, f"origin_{org}"), args.bins)
 
     # --- which TPC clusters does FM not score? -----------------------------------
     sk = fm_skipped_breakdown(args.merged_dir, segs)

@@ -1,0 +1,26 @@
+{
+  // Source Control was stuck on "Scanning folder for Git repositories".
+  // This repo has no nested repositories, so don't scan subfolders: the
+  // workspace root repo is still opened directly.
+  "git.repositoryScanMaxDepth": 0,
+  "git.repositoryScanIgnoredFolders": ["fm4npp_eval", "node_modules"],
+  // The folder is often opened as /sphenix/user/... (a symlink to
+  // /gpfs/mnt/gpfs02/...); open the repo without prompting either way.
+  "git.openRepositoryInParentFolders": "always",
+  // Keep the file watcher and search out of the symlinked shared data and
+  // the large generated output folders.
+  "files.watcherExclude": {
+    "**/fm4npp_eval/**": true,
+    "**/evaluation*/**": true,
+    "**/bands*/**": true,
+    "**/priors*/**": true,
+    "**/__pycache__/**": true,
+    "**/*.root": true
+  },
+  "search.followSymlinks": false,
+  // Wrap long lines (e.g. one-paragraph-per-line LaTeX) for display only;
+  // show diffs inline, which reads better with wrapped paragraphs.
+  "editor.wordWrap": "on",
+  "diffEditor.wordWrap": "on",
+  "diffEditor.renderSideBySide": false
+}
