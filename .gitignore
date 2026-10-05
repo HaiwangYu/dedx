@@ -27,3 +27,6 @@ bands*
 evaluation*
 *.csv
 *.png
+
+# Symlink to shared FM evaluation data
+fm4npp_eval
