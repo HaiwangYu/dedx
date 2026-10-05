@@ -64,7 +64,14 @@ $PY compare_pid_roc.py           # uses caches if present; --force to recompute
 ```
 
 Useful flags: `--bin-lo/--bin-hi` (ROC momentum bin), `--fit-lo/--fit-hi`
-(GPR fit range), `--force` (ignore caches).
+(GPR fit range), `--ncl-min` (cluster-count cut), `--root-file` / `--gpr-eval-file`
+(GPR training / evaluation samples; eval defaults to the training file), `--force`
+(ignore caches).
+
+> **Defaults changed (2026-10-02):** the script now applies `--ncl-min 20` and reads
+> `calotrkana-1M-ncl.root` (built by `make_ncl_root.py`, which adds
+> `tpc_seeds_nclusters`). The plots in *this* folder were made without the cut;
+> reproduce them with `--ncl-min 0`. See `../fm-vs-gpr-2026-10-02-ncl20`.
 
 ### Caches (written to this directory)
 - `gpr_scores_0.5_2.0.csv` — per-track GPR `score_frac` for π/K/p (fast to rebuild).

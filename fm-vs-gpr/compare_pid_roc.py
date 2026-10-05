@@ -17,6 +17,13 @@ Design decisions (see README.md in this directory for rationale):
   * Momentum variable: each method uses its own truth momentum.  For the GPR
     ROOT file that is `tpc_seeds_maxparticle_p` (the truth momentum of the
     dominant contributing particle); for FM it is |(px,py,pz)|.
+  * Cluster-count cut (--ncl-min, default 20; 0 disables): GPR keeps seeds with
+    tpc_seeds_nclusters >= ncl-min (applied to band fit, priors and scoring);
+    FM keeps tracks with >= ncl-min truth clusters (points of the truth track).
+  * GPR training and evaluation samples are configurable separately
+    (--root-file trains the bands/priors, --gpr-eval-file is scored and compared
+    with FM; by default they are the same file). The same selection, including
+    the cluster cut, is applied to both.
   * GPR scoring matches the deployed configuration: likelihood = 1/|dedx-mean|
     with sigma forced to 1, multiplied by a per-momentum-bin class prior, then
     normalised across the three species (identical to dedx_analysis with
@@ -30,8 +37,10 @@ import argparse
 import os
 import sys
 
+import awkward as ak
 import numpy as np
 import pandas as pd
+import uproot
 import matplotlib
 
 matplotlib.use("Agg")
@@ -89,17 +98,38 @@ def roc_curve_np(y_true, y_score):
 # ---------------------------------------------------------------------------
 # GPR side
 # ---------------------------------------------------------------------------
-def build_gpr_scores(
-    root_file,
-    fit_lo,
-    fit_hi,
-    momentum_bins=200,
-    dedx_max=1000.0,
-    sample_size=5000,
-    seed=42,
-):
-    """Fit folded GPR bands + priors over [fit_lo, fit_hi] and return a track
-    table with score_frac per species. Charge-folded (|pid|), momentum = p."""
+def load_seed_nclusters(root_file, branch="tpc_seeds_nclusters"):
+    """Flattened per-seed cluster count (see make_ncl_root.py)."""
+    with uproot.open(root_file) as f:
+        tree = f["T"]
+        if branch not in tree:
+            raise ValueError(
+                f"'{branch}' not in {root_file}; build it with make_ncl_root.py "
+                "or pass --ncl-min 0")
+        arr = tree[branch].array(library="ak")
+    return ak.to_numpy(ak.flatten(arr, axis=None)).astype(np.int64)
+
+
+def gpr_base_mask(p, dedx, apid, ncl=None, ncl_min=0, dedx_max=1000.0):
+    """Seed selection shared by every GPR sample: finite values, dedx < dedx_max,
+    p > 0, pi/K/p truth label, and (if ncl_min > 0) at least ncl_min clusters."""
+    base = (
+        np.isfinite(dedx)
+        & np.isfinite(p)
+        & np.isfinite(apid)
+        & (dedx < dedx_max)
+        & (p > 0)
+        & np.isin(apid.astype(np.int64), SPECIES)
+    )
+    if ncl_min > 0:
+        base &= ncl >= ncl_min
+    return base
+
+
+def load_gpr_sample(root_file, ncl_min=0, dedx_max=1000.0):
+    """Load (p, dedx, |pid|) for the pi/K/p seeds of one GPR sample, after the
+    base selection and the cluster-count cut. Used for both the training and
+    the evaluation sample, so the two always get identical selections."""
     arrays = load_root_branches(
         input_file=root_file,
         tree_name="T",
@@ -111,23 +141,34 @@ def build_gpr_scores(
     p = np.asarray(arrays["momentum"], dtype=float)
     apid = np.abs(np.asarray(arrays["pid"], dtype=float))
 
-    base = (
-        np.isfinite(dedx)
-        & np.isfinite(p)
-        & np.isfinite(apid)
-        & (dedx < dedx_max)
-        & (p > 0)
-        & np.isin(apid.astype(np.int64), SPECIES)
-    )
-    fit_window = base & (p >= fit_lo) & (p <= fit_hi)
+    ncl = load_seed_nclusters(root_file) if ncl_min > 0 else None
+    if ncl is not None and ncl.size != dedx.size:
+        raise ValueError("tpc_seeds_nclusters length does not match dedx")
+    base = gpr_base_mask(p, dedx, apid, ncl, ncl_min, dedx_max)
+    return p[base], dedx[base], apid[base].astype(np.int64)
 
-    dedx_f = dedx[fit_window]
+
+def train_gpr(
+    p,
+    dedx,
+    apid,
+    fit_lo,
+    fit_hi,
+    momentum_bins=200,
+    sample_size=5000,
+    seed=42,
+):
+    """Fit folded GPR bands + priors over [fit_lo, fit_hi] on the training
+    sample. Returns a table (one row per momentum grid point) holding the band
+    mean/sigma and the prior of each species; see models_from_table()."""
+    fit_window = (p >= fit_lo) & (p <= fit_hi)
     p_f = p[fit_window]
-    apid_f = apid[fit_window].astype(np.int64)
+    dedx_f = dedx[fit_window]
+    apid_f = apid[fit_window]
 
     # --- bands: reuse the exact GPR fitting code, folded over |p| -----------
     eval_grid = np.linspace(fit_lo, fit_hi, momentum_bins)
-    band_models = {}
+    table = pd.DataFrame({"momentum": eval_grid})
     for sp in SPECIES:
         m = apid_f == sp
         mean, sigma = _fit_gaussian_process(
@@ -139,31 +180,42 @@ def build_gpr_scores(
             momentum_gap=(-0.2, 0.2),  # all data is positive |p|, no gap effect
             analysis_range=(fit_lo, fit_hi),
         )
-        band_models[sp] = _BandModel(eval_grid.copy(), mean, sigma)
+        table[f"mean_{sp}"] = mean
+        table[f"sigma_{sp}"] = sigma
 
     # --- priors: per |p|-bin class fraction over the 3-species population ----
+    # momentum_bins prior bins over [fit_lo, fit_hi]; row i holds bin i.
     bin_edges = np.linspace(fit_lo, fit_hi, momentum_bins + 1)
     total_counts, _ = np.histogram(p_f, bins=bin_edges)
-    prior_models = {}
     for sp in SPECIES:
         counts, _ = np.histogram(p_f[apid_f == sp], bins=bin_edges)
         with np.errstate(divide="ignore", invalid="ignore"):
-            probs = np.divide(
+            table[f"prior_{sp}"] = np.divide(
                 counts, total_counts,
                 out=np.zeros(counts.shape, dtype=float),
                 where=total_counts > 0,
             )
-        prior_models[sp] = _PriorDistribution(bin_edges, probs)
+    return table
 
-    # --- score the full 3-species population (deployed scoring) -------------
-    p_e = p[base]
-    dedx_e = dedx[base]
-    apid_e = apid[base].astype(np.int64)
+
+def models_from_table(table, fit_lo, fit_hi):
+    """Rebuild the band and prior models from a train_gpr() table."""
+    grid = table["momentum"].to_numpy()
+    bin_edges = np.linspace(fit_lo, fit_hi, len(grid) + 1)
+    band_models, prior_models = {}, {}
+    for sp in SPECIES:
+        band_models[sp] = _BandModel(
+            grid.copy(), table[f"mean_{sp}"].to_numpy(), table[f"sigma_{sp}"].to_numpy())
+        prior_models[sp] = _PriorDistribution(bin_edges, table[f"prior_{sp}"].to_numpy())
+    return band_models, prior_models
+
+
+def score_gpr(p, dedx, apid, band_models, prior_models):
+    """Score an evaluation sample with trained models (deployed scoring)."""
     score_frac = _compute_score_frac_matrix(
-        p_e, dedx_e, SPECIES, band_models, prior_models, force_sigma_one=True
+        p, dedx, SPECIES, band_models, prior_models, force_sigma_one=True
     )  # shape (3, n)
-
-    df = pd.DataFrame({"p": p_e, "apid": apid_e})
+    df = pd.DataFrame({"p": p, "apid": apid})
     for i, sp in enumerate(SPECIES):
         df[f"score_{sp}"] = score_frac[i]
     return df
@@ -207,13 +259,15 @@ def build_fm_scores(csv_path, chunksize=2_000_000):
         g = chunk.groupby(key_cols, sort=False)
         part = g.agg(agg)
         part["kin_cnt"] = g["px"].count()
+        part["n_clusters"] = g.size()  # truth clusters (points) of this track
         for c in prob_cols:
             part[f"{c}_cnt"] = g[c].count()
         partials.append(part.reset_index())
         print(f"  FM chunk: rows={n_rows:,} partial-tracks={len(part):,}", flush=True)
 
     allp = pd.concat(partials, ignore_index=True)
-    sum_cols = kin_cols + prob_cols + ["kin_cnt"] + [f"{c}_cnt" for c in prob_cols]
+    sum_cols = (kin_cols + prob_cols + ["kin_cnt", "n_clusters"]
+                + [f"{c}_cnt" for c in prob_cols])
     final = allp.groupby(key_cols, sort=False).agg(
         {label_col: "first", **{c: "sum" for c in sum_cols}}
     )
@@ -225,6 +279,7 @@ def build_fm_scores(csv_path, chunksize=2_000_000):
     out = pd.DataFrame({
         "gt_pid_class": final[label_col].to_numpy().astype(int),
         "p": np.sqrt(px * px + py * py + pz * pz),
+        "n_clusters": final["n_clusters"].to_numpy().astype(int),
     })
     for i, c in enumerate(prob_cols, start=1):
         cnt = final[f"{c}_cnt"].to_numpy()
@@ -249,43 +304,10 @@ def roc_for_bin(df, score_col, truth_col, truth_val, lo, hi):
     return fpr, tpr, auc, int(y_true.sum()), int(y_true.size)
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--root-file", default=os.path.join(REPO_ROOT, "calotrkana-1M.root"))
-    ap.add_argument("--fm-csv", default=os.path.join(
-        REPO_ROOT, "fm4npp_eval/PID",
-        "d9_m5_k30_p20_joint_lora_focal_joint_pretrain_d70000_0308_seed42"
-        "_eval_per_point_pid_from_prototype.csv"))
-    ap.add_argument("--fit-lo", type=float, default=0.5)
-    ap.add_argument("--fit-hi", type=float, default=2.0)
-    ap.add_argument("--bin-lo", type=float, default=0.8)
-    ap.add_argument("--bin-hi", type=float, default=1.2)
-    ap.add_argument("--outdir", default=os.path.dirname(os.path.abspath(__file__)))
-    ap.add_argument("--force", action="store_true", help="ignore caches and recompute")
-    args = ap.parse_args()
-
-    os.makedirs(args.outdir, exist_ok=True)
-    gpr_cache = os.path.join(args.outdir, f"gpr_scores_{args.fit_lo}_{args.fit_hi}.csv")
-    fm_cache = os.path.join(args.outdir, "fm_track_scores.csv")
-
-    if args.force or not os.path.exists(gpr_cache):
-        print(f"[GPR] fitting bands+priors over [{args.fit_lo}, {args.fit_hi}] ...")
-        gpr_df = build_gpr_scores(args.root_file, args.fit_lo, args.fit_hi)
-        gpr_df.to_csv(gpr_cache, index=False)
-        print(f"[GPR] cached -> {gpr_cache}")
-    else:
-        print(f"[GPR] using cache {gpr_cache}")
-        gpr_df = pd.read_csv(gpr_cache)
-
-    if args.force or not os.path.exists(fm_cache):
-        print("[FM] aggregating per-point CSV to track level ...")
-        fm_df = build_fm_scores(args.fm_csv)
-        fm_df.to_csv(fm_cache, index=False)
-        print(f"[FM] cached -> {fm_cache}")
-    else:
-        print(f"[FM] using cache {fm_cache}")
-        fm_df = pd.read_csv(fm_cache)
-
+def plot_comparison(gpr_df, fm_df, lo, hi, outdir):
+    """3-panel (pi/K/p) one-vs-rest ROC of FM vs GPR in p in [lo, hi).
+    gpr_df needs columns p, apid, score_<pdg>; fm_df needs p, gt_pid_class,
+    score_<pdg>. Writes the PNG/PDF and the AUC summary CSV."""
     # --- plot ---------------------------------------------------------------
     # Paper-sized fonts: ~ body-text size relative to the figure.
     plt.rcParams.update({
@@ -296,7 +318,6 @@ def main():
         "ytick.labelsize": 18,
         "legend.fontsize": 19,
     })
-    lo, hi = args.bin_lo, args.bin_hi
     fig, axes = plt.subplots(1, 3, figsize=(15, 5.0), dpi=150)
     summary = []
     for ax, sp in zip(axes, SPECIES):
@@ -325,18 +346,89 @@ def main():
         ]
 
     fig.tight_layout(pad=0.4, w_pad=0.6)
-    png = os.path.join(args.outdir, f"pid_roc_comparison_{lo}_{hi}.png")
-    pdf = os.path.join(args.outdir, f"pid_roc_comparison_{lo}_{hi}.pdf")
+    png = os.path.join(outdir, f"pid_roc_comparison_{lo}_{hi}.png")
+    pdf = os.path.join(outdir, f"pid_roc_comparison_{lo}_{hi}.pdf")
     fig.savefig(png, bbox_inches="tight")
     fig.savefig(pdf, bbox_inches="tight")
     plt.close(fig)
 
     sdf = pd.DataFrame(summary)
-    sdf.to_csv(os.path.join(args.outdir, f"auc_summary_{lo}_{hi}.csv"), index=False)
+    sdf.to_csv(os.path.join(outdir, f"auc_summary_{lo}_{hi}.csv"), index=False)
     print("\n=== AUC summary (p in [%.2f, %.2f)) ===" % (lo, hi))
     print(sdf.to_string(index=False))
     print(f"\nSaved: {png}\n       {pdf}")
 
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--root-file", default=os.path.join(REPO_ROOT, "calotrkana-1M-ncl.root"),
+                    help="GPR training sample (bands + priors are fit on it)")
+    ap.add_argument("--gpr-eval-file", default=None,
+                    help="GPR evaluation sample compared with FM (default: --root-file)")
+    ap.add_argument("--fm-csv", default=os.path.join(
+        REPO_ROOT, "fm4npp_eval/PID",
+        "d9_m5_k30_p20_joint_lora_focal_joint_pretrain_d70000_0308_seed42"
+        "_eval_per_point_pid_from_prototype.csv"))
+    ap.add_argument("--fit-lo", type=float, default=0.5)
+    ap.add_argument("--fit-hi", type=float, default=2.0)
+    ap.add_argument("--bin-lo", type=float, default=0.8)
+    ap.add_argument("--bin-hi", type=float, default=1.2)
+    ap.add_argument("--outdir", default=os.path.dirname(os.path.abspath(__file__)))
+    ap.add_argument("--ncl-min", type=int, default=20,
+                    help="min clusters per track for both methods (0 = no cut)")
+    ap.add_argument("--force", action="store_true", help="ignore caches and recompute")
+    args = ap.parse_args()
+
+    os.makedirs(args.outdir, exist_ok=True)
+    ncl_tag = f"_ncl{args.ncl_min}" if args.ncl_min > 0 else ""
+    eval_file = args.gpr_eval_file or args.root_file
+    stem = lambda f: os.path.splitext(os.path.basename(f))[0]
+    same_sample = os.path.realpath(eval_file) == os.path.realpath(args.root_file)
+    eval_tag = "" if same_sample else f"_eval-{stem(eval_file)}"
+    gpr_model_cache = os.path.join(
+        args.outdir, f"gpr_model_{stem(args.root_file)}_{args.fit_lo}_{args.fit_hi}{ncl_tag}.csv")
+    gpr_cache = os.path.join(
+        args.outdir, f"gpr_scores_{args.fit_lo}_{args.fit_hi}{ncl_tag}{eval_tag}.csv")
+    fm_cache = os.path.join(args.outdir, "fm_track_scores.csv")
+
+    if args.force or not os.path.exists(gpr_cache):
+        if args.force or not os.path.exists(gpr_model_cache):
+            print(f"[GPR] training bands+priors over [{args.fit_lo}, {args.fit_hi}] "
+                  f"on {args.root_file} ...")
+            table = train_gpr(*load_gpr_sample(args.root_file, args.ncl_min),
+                              args.fit_lo, args.fit_hi)
+            table.to_csv(gpr_model_cache, index=False)
+            print(f"[GPR] model cached -> {gpr_model_cache}")
+        else:
+            print(f"[GPR] using model cache {gpr_model_cache}")
+            table = pd.read_csv(gpr_model_cache, float_precision="round_trip")
+        band_models, prior_models = models_from_table(table, args.fit_lo, args.fit_hi)
+        print(f"[GPR] scoring evaluation sample {eval_file} ...")
+        gpr_df = score_gpr(*load_gpr_sample(eval_file, args.ncl_min),
+                           band_models, prior_models)
+        gpr_df.to_csv(gpr_cache, index=False)
+        print(f"[GPR] cached -> {gpr_cache}")
+    else:
+        print(f"[GPR] using cache {gpr_cache}")
+        gpr_df = pd.read_csv(gpr_cache)
+
+    fm_stale = (os.path.exists(fm_cache) and args.ncl_min > 0
+                and "n_clusters" not in pd.read_csv(fm_cache, nrows=0).columns)
+    if args.force or fm_stale or not os.path.exists(fm_cache):
+        print("[FM] aggregating per-point CSV to track level ...")
+        fm_df = build_fm_scores(args.fm_csv)
+        fm_df.to_csv(fm_cache, index=False)
+        print(f"[FM] cached -> {fm_cache}")
+    else:
+        print(f"[FM] using cache {fm_cache}")
+        fm_df = pd.read_csv(fm_cache)
+    if args.ncl_min > 0:
+        n0 = len(fm_df)
+        fm_df = fm_df[fm_df["n_clusters"] >= args.ncl_min]
+        print(f"[FM] ncl >= {args.ncl_min}: kept {len(fm_df):,}/{n0:,} tracks")
+
+    plot_comparison(gpr_df, fm_df, args.bin_lo, args.bin_hi, args.outdir)
 
 if __name__ == "__main__":
     main()
