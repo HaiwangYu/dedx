@@ -24,8 +24,10 @@ on truth tracks; this removes that difference.
   `seg_target == reco_cluster_g4hit_trkid`).
 - **Seed:** `tpc_seeds_clusters[start_idx : start_idx + nclusters]` → `reco_cluster_id`
   (100% found). The seed's FM score is the mean of the per-cluster FM probabilities over
-  the seed clusters that have one. 84.4% of all seed clusters have an FM score; FM skips
-  about 9.5% of TPC clusters, 96% of which are noise.
+  the seed clusters that have one. 84.4% of all seed clusters have an FM score. FM scores
+  98.9% of primary-particle TPC clusters but only 86.1% of secondary-particle ones, so 96%
+  of the unscored clusters are from secondaries (negative G4 track ids; an earlier version
+  of this note wrongly called them noise). See `../fm-vs-gpr-2026-10-05-seed-purity`.
 - **FM coverage:** 19,725 of the 25,000 events. Missing are mostly tiny events
   (< 50 TPC clusters) plus the largest ones; this looks like a selection in the FM data
   preparation, not confirmed.
@@ -67,10 +69,11 @@ combinations within the GPR fit range. The exception is kaons in [1,2), where GP
 comparison (FM now 0.875 vs GPR 0.852).
 
 FM's kaon AUC is lower on seeds than on truth tracks (0.713 vs 0.749 and 0.605 vs
-0.700). A seed's label comes from the truth particle with the most clusters, with no
-purity requirement, so a seed can mix clusters from several particles, and FM scores
-each cluster on its own. That may explain it, but it hasn't been checked; a seed-purity
-study would.
+0.700). The seed-purity study (`../fm-vs-gpr-2026-10-05-seed-purity`) shows this is
+**not** due to impure seeds: seeds are very pure (median 0.93). Instead, 33% of seeds
+have a secondary as their top truth track, with a very different species mix, while
+the truth-track FM numbers only include primary tracks (`seg_target > 0`). On primary
+seeds, GPR still leads for kaons in [1,2) (0.631 vs 0.587).
 
 ## Validation
 

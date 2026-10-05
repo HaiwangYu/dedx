@@ -54,10 +54,64 @@ def load_merged_seeds(files):
         a = uproot.open(f)["T"].arrays(seed_br + ["fm_has_event"], library="ak")
         n = ak.num(a["tpc_seeds_dedx"])
         cols = {b: ak.to_numpy(ak.flatten(a[b])) for b in seed_br}
-        cols["fm_has_event"] = np.repeat(ak.to_numpy(a["fm_has_event"]), ak.to_numpy(n))
+        n = ak.to_numpy(n)
+        cols["fm_has_event"] = np.repeat(ak.to_numpy(a["fm_has_event"]), n)
         cols["file"] = os.path.basename(f)
+        cols["segment"] = int(os.path.basename(f)[6:].split("_")[0])
+        cols["entry"] = np.repeat(np.arange(len(n)), n)
+        cols["seed_idx"] = ak.to_numpy(ak.flatten(ak.local_index(a["tpc_seeds_dedx"])))
         parts.append(pd.DataFrame(cols))
     return pd.concat(parts, ignore_index=True)
+
+
+def build_same_seed_table(merged_dir, gpr_model, fit_lo=0.5, fit_hi=2.0, ncl_min=20,
+                          fm_min_scored=1, require_fm=True, verbose=True):
+    """Select seeds and score them with both methods. Returns (seeds, gpr_df, fm_df):
+    seeds has one row per selected seed (segment, entry, seed_idx, p, apid, ...,
+    gpr_score_<pdg>, fm_score_<pdg>); gpr_df / fm_df are in plot_comparison format."""
+    files = sorted(glob.glob(os.path.join(merged_dir, "OutDir*_calotrkana_fm.root")),
+                   key=lambda f: int(os.path.basename(f)[6:].split("_")[0]))
+    if verbose:
+        print(f"[seeds] {len(files)} merged files from {merged_dir}")
+    d = load_merged_seeds(files)
+    p = d["tpc_seeds_maxparticle_p"].to_numpy(float)
+    dedx = d["tpc_seeds_dedx"].to_numpy(float)
+    apid = np.abs(d["tpc_seeds_maxparticle_pid"].to_numpy(float))
+    ncl = d["tpc_seeds_nclusters"].to_numpy(np.int64)
+
+    base = gpr_base_mask(p, dedx, apid, ncl, ncl_min)
+    in_fm = d["fm_has_event"].to_numpy() == 1
+    scored = d["tpc_seeds_fm_nclusters_scored"].to_numpy() >= fm_min_scored
+    sel = base & in_fm & scored if require_fm else base
+    if verbose:
+        print(f"[seeds] all {len(d):,} | GPR base selection (ncl >= {ncl_min}) {base.sum():,} | "
+              f"+ event in FM {(base & in_fm).sum():,} | + >= {fm_min_scored} FM-scored "
+              f"cluster(s) {(base & in_fm & scored).sum():,} | used {sel.sum():,}")
+
+    # --- GPR scores with the trained model --------------------------------------
+    table = pd.read_csv(gpr_model, float_precision="round_trip")
+    band_models, prior_models = models_from_table(table, fit_lo, fit_hi)
+    apid_i = apid[sel].astype(np.int64)
+    gpr_df = score_gpr(p[sel], dedx[sel], apid_i, band_models, prior_models)
+
+    # --- FM scores of the same seeds ---------------------------------------------
+    pdg_to_fm = {v: k for k, v in FM_CLASS_TO_PDG.items()}
+    probs = np.stack([d[f"tpc_seeds_fm_pid_prob_{c}"].to_numpy(float)[sel] for c in FM_CLASSES])
+    probs = np.where(probs >= 0, probs, np.nan)  # -1 = no FM score
+    denom = np.nansum(probs, axis=0)
+    fm_df = pd.DataFrame({"p": p[sel], "gt_pid_class": [pdg_to_fm[a] for a in apid_i]})
+    for i, sp in enumerate(SPECIES):
+        fm_df[f"score_{sp}"] = probs[i] / np.where(denom > 0, denom, np.nan)
+
+    seeds = pd.DataFrame({
+        "file": d["file"].to_numpy()[sel], "segment": d["segment"].to_numpy()[sel],
+        "entry": d["entry"].to_numpy()[sel], "seed_idx": d["seed_idx"].to_numpy()[sel],
+        "p": p[sel], "apid": apid_i, "dedx": dedx[sel], "nclusters": ncl[sel],
+        "fm_nclusters_scored": d["tpc_seeds_fm_nclusters_scored"].to_numpy()[sel]})
+    for sp in SPECIES:
+        seeds[f"gpr_score_{sp}"] = gpr_df[f"score_{sp}"].to_numpy()
+        seeds[f"fm_score_{sp}"] = fm_df[f"score_{sp}"].to_numpy()
+    return seeds, gpr_df, fm_df
 
 
 def main():
@@ -78,50 +132,13 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
-    files = sorted(glob.glob(os.path.join(args.merged_dir, "OutDir*_calotrkana_fm.root")),
-                   key=lambda f: int(os.path.basename(f)[6:].split("_")[0]))
-    print(f"[seeds] {len(files)} merged files from {args.merged_dir}")
-    d = load_merged_seeds(files)
-    p = d["tpc_seeds_maxparticle_p"].to_numpy(float)
-    dedx = d["tpc_seeds_dedx"].to_numpy(float)
-    apid = np.abs(d["tpc_seeds_maxparticle_pid"].to_numpy(float))
-    ncl = d["tpc_seeds_nclusters"].to_numpy(np.int64)
-
-    base = gpr_base_mask(p, dedx, apid, ncl, args.ncl_min)
-    in_fm = d["fm_has_event"].to_numpy() == 1
-    scored = d["tpc_seeds_fm_nclusters_scored"].to_numpy() >= args.fm_min_scored
-    sel = base if args.no_require_fm else base & in_fm & scored
-    print(f"[seeds] all {len(d):,} | GPR base selection (ncl >= {args.ncl_min}) {base.sum():,} | "
-          f"+ event in FM {(base & in_fm).sum():,} | + >= {args.fm_min_scored} FM-scored "
-          f"cluster(s) {(base & in_fm & scored).sum():,} | used {sel.sum():,}")
-
-    # --- GPR scores with the trained model --------------------------------------
-    table = pd.read_csv(args.gpr_model, float_precision="round_trip")
-    band_models, prior_models = models_from_table(table, args.fit_lo, args.fit_hi)
-    apid_i = apid[sel].astype(np.int64)
-    gpr_df = score_gpr(p[sel], dedx[sel], apid_i, band_models, prior_models)
-
-    # --- FM scores of the same seeds ---------------------------------------------
-    pdg_to_fm = {v: k for k, v in FM_CLASS_TO_PDG.items()}
-    probs = np.stack([d[f"tpc_seeds_fm_pid_prob_{c}"].to_numpy(float)[sel] for c in FM_CLASSES])
-    probs = np.where(probs >= 0, probs, np.nan)  # -1 = no FM score
-    denom = np.nansum(probs, axis=0)
-    fm_df = pd.DataFrame({"p": p[sel], "gt_pid_class": [pdg_to_fm[a] for a in apid_i]})
-    for i, sp in enumerate(SPECIES):
-        fm_df[f"score_{sp}"] = probs[i] / np.where(denom > 0, denom, np.nan)
-
-    seeds = pd.DataFrame({"file": d["file"].to_numpy()[sel], "p": p[sel], "apid": apid_i,
-                          "dedx": dedx[sel], "nclusters": ncl[sel],
-                          "fm_nclusters_scored": d["tpc_seeds_fm_nclusters_scored"].to_numpy()[sel]})
-    for sp in SPECIES:
-        seeds[f"gpr_score_{sp}"] = gpr_df[f"score_{sp}"].to_numpy()
-        seeds[f"fm_score_{sp}"] = fm_df[f"score_{sp}"].to_numpy()
+    seeds, gpr_df, fm_df = build_same_seed_table(
+        args.merged_dir, args.gpr_model, args.fit_lo, args.fit_hi, args.ncl_min,
+        args.fm_min_scored, require_fm=not args.no_require_fm)
     seeds.to_csv(os.path.join(args.outdir, "same_seed_scores.csv"), index=False)
-
     for b in args.bins.split(";"):
         lo, hi = (float(x) for x in b.split(","))
         plot_comparison(gpr_df, fm_df, lo, hi, args.outdir)
-
 
 if __name__ == "__main__":
     main()

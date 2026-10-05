@@ -1,5 +1,10 @@
 # FM vs. GPR — apple-to-apple PID capability comparison
 
+> **Trad–FM matching and same-seed comparison:** see
+> [`trad-fm-matching.html`](trad-fm-matching.html). It covers how FM per-cluster scores
+> were matched to the traditional reco, where the merged ROOT files are and how to use
+> them, how the primary/secondary AUCs are computed, and the results tables and plots.
+
 One figure, three panels (π / K / p), each overlaying the **one-vs-rest ROC
 curve** of two PID methods in a single momentum bin (default **0.8–1.2 GeV/c**):
 

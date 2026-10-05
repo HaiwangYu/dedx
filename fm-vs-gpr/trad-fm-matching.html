@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trad–FM Matching</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1f2328; --muted: #5d6470; --rule: #d9d6cf;
+    --card: #ffffff; --code-bg: #f2f0ea; --accent: #2457a6; --fm: #1f77b4; --gpr: #c62828;
+    --good: #e9f3ea; --warn: #fdf3e1;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181c; --fg: #e6e6e3; --muted: #a2a8b3; --rule: #343841;
+      --card: #1d2026; --code-bg: #23272e; --accent: #7aa7ec; --fm: #6cb4ee; --gpr: #f07a7a;
+      --good: #1f2b22; --warn: #2e2719;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181c; --fg: #e6e6e3; --muted: #a2a8b3; --rule: #343841;
+    --card: #1d2026; --code-bg: #23272e; --accent: #7aa7ec; --fm: #6cb4ee; --gpr: #f07a7a;
+    --good: #1f2b22; --warn: #2e2719;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+  header h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 6px; }
+  header p.sub { color: var(--muted); margin: 0 0 24px; }
+  h2 { font-size: 1.4rem; margin: 48px 0 12px; padding-top: 8px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin: 28px 0 8px; }
+  a { color: var(--accent); }
+  p, li { max-width: 78ch; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  nav.toc { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 20px; }
+  nav.toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  nav.toc li { break-inside: avoid; }
+  .tablewrap { overflow-x: auto; margin: 12px 0 8px; }
+  table { border-collapse: collapse; width: 100%; background: var(--card); font-size: 0.93rem; }
+  th, td { border-bottom: 1px solid var(--rule); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { font-weight: 600; background: var(--code-bg); }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.lead { font-weight: 700; }
+  tr.sep td { border-top: 2px solid var(--rule); }
+  .note { background: var(--warn); border-left: 4px solid #d89a2b; padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
+  .ok { background: var(--good); border-left: 4px solid #3f8f4f; padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
+  figure { margin: 18px 0; background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 10px; }
+  figure img { display: block; width: 100%; height: auto; border-radius: 4px; background: #fff; }
+  figcaption { color: var(--muted); font-size: 0.9rem; margin-top: 6px; }
+  .formula { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 16px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.92rem; overflow-x: auto; }
+  .fm { color: var(--fm); font-weight: 600; } .gpr { color: var(--gpr); font-weight: 600; }
+  .muted { color: var(--muted); }
+  ol.steps > li { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Trad–FM matching and same-seed PID comparison</h1>
+  <p class="sub">How Gabor's per-cluster FM PID scores were attached to the traditional
+  sPHENIX reconstruction, where the merged files live, how to use them, and the
+  FM vs. GPR results on identical reconstructed seeds (including the primary/secondary split).
+  Repository: <code>/sphenix/user/hwyu/dedx</code>, scripts in <code>fm-vs-gpr/</code>. October 2026.</p>
+</header>
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#inputs">Inputs</a></li>
+    <li><a href="#matching">Matching procedure</a></li>
+    <li><a href="#merged">Merged files: location and contents</a></li>
+    <li><a href="#usage">How to use the merged files</a></li>
+    <li><a href="#sameseed">Same-seed FM vs. GPR comparison</a></li>
+    <li><a href="#auc">How the AUCs and errors are computed</a></li>
+    <li><a href="#origin">Primary / secondary split and seed purity</a></li>
+    <li><a href="#results">Results tables</a></li>
+    <li><a href="#plots">Plots</a></li>
+    <li><a href="#validation">Validation</a></li>
+    <li><a href="#caveats">Caveats and open questions</a></li>
+    <li><a href="#files">Scripts and files</a></li>
+  </ol>
+</nav>
+
+<h2 id="inputs">1. Inputs</h2>
+<div class="tablewrap"><table>
+  <tr><th>Input</th><th>Path</th><th>Notes</th></tr>
+  <tr><td>Traditional reco + truth trees</td>
+      <td><code>/sphenix/user/shuhangli/calotrack_tree/macro/condor_pid_x10/OutDir&lt;N&gt;/calotrkana.root</code>, N = 0–24</td>
+      <td>Tree <code>T</code>, 1000 entries per file (25,000 events). Has all reco clusters
+      (<code>reco_cluster_*</code>) and TPC seeds (<code>tpc_seeds_*</code>).</td></tr>
+  <tr><td>FM per-cluster PID (Gabor)</td>
+      <td><code>/sphenix/u/ggalgoczi/FM-PID_ensemble_combiner_run21_25seg.csv.gz</code></td>
+      <td>16,979,350 rows (one per point/cluster), 19,725 events. Columns include
+      <code>segment</code>, <code>entry</code>, <code>x,y,z</code>, <code>E</code>,
+      <code>seg_target</code>, <code>pred_assignment</code>, <code>pid_prob_class_0..4</code>.</td></tr>
+</table></div>
+<p>FM class convention: 0 = other, 1 = π, 2 = K, 3 = p, 4 = e. The comparison uses classes 1–3.</p>
+
+<h2 id="matching">2. Matching procedure</h2>
+<p>Implemented in <code>fm-vs-gpr/merge_fm_to_root.py</code>.</p>
+<ol class="steps">
+  <li><strong>Event.</strong> FM row <code>(segment, entry)</code> ↔ file <code>OutDir&lt;segment&gt;</code>,
+    tree entry <code>&lt;entry&gt;</code>. In the CSV, each <code>(segment, entry)</code> maps one-to-one onto
+    <code>(batch_idx, sample_idx_in_batch)</code>, and <code>point_idx</code> runs 0..n−1 within each event.
+    <code>runnumber</code> = 21 matches "run21" in the file name.
+    <span class="muted"><code>evtnumber</code> is 0 in every entry, so it can't be used as a key.</span></li>
+  <li><strong>Cluster.</strong> FM points are stored in a different order from the ROOT clusters, so they are
+    matched by position. For each FM point, find the nearest TPC reco cluster
+    (<code>reco_cluster_detid == 2</code>) in <code>(reco_cluster_x, y, z)</code> with a KD-tree. A match is
+    accepted if the distance is &lt; 1e-3 cm and no other point claims the same cluster.</li>
+  <li><strong>Cross-checks per match.</strong> <code>E == reco_cluster_E</code> and
+    <code>seg_target == reco_cluster_g4hit_trkid</code> (counted and reported; both agree 100%).</li>
+  <li><strong>Seed → clusters.</strong> A seed's cluster keys are
+    <code>tpc_seeds_clusters[start_idx : start_idx + nclusters]</code>, looked up in
+    <code>reco_cluster_id</code>. <code>start_idx</code> is the running sum of <code>nclusters</code> (checked per event).</li>
+  <li><strong>Seed FM score.</strong> The mean of the per-cluster FM probabilities over the seed's
+    clusters that have an FM score; <code>tpc_seeds_fm_nclusters_scored</code> counts them.</li>
+</ol>
+
+<div class="ok"><strong>Match quality (all 25 segments):</strong> 16,979,350 / 16,979,350 FM points matched;
+maximum distance 5.05e-5 cm (CSV float rounding); 0 duplicate claims; 0 energy mismatches;
+0 track-id mismatches; 0 seed keys missing from <code>reco_cluster_id</code>.
+4,373,248 / 5,182,228 seed clusters (84.4%) have an FM score.</div>
+
+<h3>Coverage</h3>
+<ul>
+  <li><strong>Events:</strong> 19,725 of 25,000 are in the FM CSV. 4,195 of the 5,275 missing events have
+    fewer than 50 TPC clusters (FM's smallest event has exactly 50 points). The rest of the missing events
+    include the largest ones (FM's largest event has 3,200 points). This looks like a size selection in
+    the FM data preparation but is not confirmed.</li>
+  <li><strong>Clusters:</strong> FM points are TPC clusters only. FM scores 98.9% of primary-particle TPC
+    clusters and 86.1% of secondary-particle ones (see <a href="#origin">§7</a>).</li>
+</ul>
+
+<h2 id="merged">3. Merged files: location and contents</h2>
+<p><strong>Location:</strong>
+<code>/sphenix/user/hwyu/calotrack_tree/macro/dedx-v2/fm-merged-run21-25seg/</code><br>
+<strong>Files:</strong> <code>OutDir{0..24}_calotrkana_fm.root</code> (~17 MB each, 426 MB total), plus
+<code>merge_stats.csv</code> (per-event match statistics) and <code>merge.log</code>.</p>
+<p>Each file holds a classic TTree <code>T</code> with the <em>same 1000 entries in the same order</em> as the
+corresponding <code>calotrkana.root</code>, so it can be used on its own or as a friend tree.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Branch</th><th>Per</th><th>Meaning</th></tr>
+  <tr><td><code>runnumber</code>, <code>evtnumber</code></td><td>event</td><td>copied</td></tr>
+  <tr><td><code>fm_has_event</code></td><td>event</td><td>1 if the event is in the FM CSV, else 0</td></tr>
+  <tr class="sep"><td><code>nreco_cluster</code></td><td>event</td><td>counter (= <code>nRecoClusters</code>)</td></tr>
+  <tr><td><code>reco_cluster_id</code>, <code>reco_cluster_detid</code></td><td>cluster</td><td>copied</td></tr>
+  <tr><td><code>reco_cluster_fm_matched</code></td><td>cluster</td><td>1 if an FM point matched this cluster</td></tr>
+  <tr><td><code>reco_cluster_fm_pid_prob_{0..4}</code></td><td>cluster</td><td>FM per-point probability; −1 if no FM point</td></tr>
+  <tr><td><code>reco_cluster_fm_seg_target</code></td><td>cluster</td><td>FM truth track id (0 if none)</td></tr>
+  <tr><td><code>reco_cluster_fm_pred_assignment</code></td><td>cluster</td><td>FM predicted track id (−1 if none)</td></tr>
+  <tr class="sep"><td><code>ntpc_seeds</code></td><td>event</td><td>counter (= <code>nTPCSeeds</code>)</td></tr>
+  <tr><td><code>tpc_seeds_{id, nclusters, start_idx, dedx, maxparticle_pid, maxparticle_p}</code></td><td>seed</td><td>copied</td></tr>
+  <tr><td><code>tpc_seeds_fm_nclusters_scored</code></td><td>seed</td><td>number of seed clusters with an FM score</td></tr>
+  <tr><td><code>tpc_seeds_fm_pid_prob_{0..4}</code></td><td>seed</td><td>mean FM probability over those clusters; −1 if none</td></tr>
+  <tr class="sep"><td><code>ntpc_seeds_clusters</code>, <code>tpc_seeds_clusters</code></td><td>seed cluster</td><td>copied cluster keys</td></tr>
+</table></div>
+
+<p><strong>Regenerate</strong> (about 80 s for segment 0, mostly reading the CSV):</p>
+<pre><code>source fm-vs-gpr/env.sh
+$PY fm-vs-gpr/merge_fm_to_root.py --segments 0-24 \
+    --outdir /sphenix/user/hwyu/calotrack_tree/macro/dedx-v2/fm-merged-run21-25seg</code></pre>
+<p class="muted"><code>env.sh</code> sets up the sPHENIX alma9.2 stack and <code>$PY</code>, the venv-dev Python with uproot, awkward, scipy and scikit-learn.</p>
+
+<h2 id="usage">4. How to use the merged files</h2>
+<h3>Python (uproot)</h3>
+<pre><code>import uproot, awkward as ak, numpy as np
+t = uproot.open("/sphenix/user/hwyu/calotrack_tree/macro/dedx-v2/"
+                "fm-merged-run21-25seg/OutDir0_calotrkana_fm.root")["T"]
+a = t.arrays(["fm_has_event", "tpc_seeds_maxparticle_pid", "tpc_seeds_maxparticle_p",
+              "tpc_seeds_dedx", "tpc_seeds_fm_nclusters_scored",
+              "tpc_seeds_fm_pid_prob_1", "tpc_seeds_fm_pid_prob_2", "tpc_seeds_fm_pid_prob_3"])
+ok = (a.fm_has_event == 1) &amp; (a.tpc_seeds_fm_nclusters_scored &gt; 0)   # seeds with an FM score
+pK = a.tpc_seeds_fm_pid_prob_2[ok]                                     # per-seed FM kaon probability
+# FM score used in the comparison: renormalise over pi/K/p
+s = a.tpc_seeds_fm_pid_prob_1 + a.tpc_seeds_fm_pid_prob_2 + a.tpc_seeds_fm_pid_prob_3
+score_K = (a.tpc_seeds_fm_pid_prob_2 / s)[ok]</code></pre>
+
+<h3>ROOT (C++) friend tree</h3>
+<pre><code>TFile f("/sphenix/user/shuhangli/calotrack_tree/macro/condor_pid_x10/OutDir0/calotrkana.root");
+TTree* T = (TTree*)f.Get("T");
+T-&gt;AddFriend("F=T", "/sphenix/user/hwyu/calotrack_tree/macro/dedx-v2/fm-merged-run21-25seg/OutDir0_calotrkana_fm.root");
+// FM kaon probability of reco seeds whose best-match truth particle is a kaon
+T-&gt;Draw("F.tpc_seeds_fm_pid_prob_2",
+        "F.fm_has_event &amp;&amp; abs(tpc_seeds_maxparticle_pid)==321 &amp;&amp; F.tpc_seeds_fm_nclusters_scored&gt;0");</code></pre>
+<p>For all 25 segments, build a <code>TChain</code> of the original files and a second <code>TChain</code> of the
+merged files <em>in the same segment order</em>, then call <code>AddFriend</code> on the chain.</p>
+<div class="note"><strong>Conventions to remember:</strong> −1 means "no FM score" for every
+<code>*_fm_pid_prob_*</code> branch; always require <code>fm_has_event == 1</code> and
+<code>tpc_seeds_fm_nclusters_scored &gt; 0</code> before using seed FM scores.</div>
+
+<h2 id="sameseed">5. Same-seed FM vs. GPR comparison</h2>
+<p>Script: <code>fm-vs-gpr/compare_same_seeds.py</code> (output in
+<code>fm-vs-gpr-2026-10-05-same-seeds-ncl20/</code>). Both methods score the <em>identical</em> seed list and
+use the same truth label (<code>|tpc_seeds_maxparticle_pid|</code>, the truth particle with the most clusters on
+the seed) and truth momentum (<code>tpc_seeds_maxparticle_p</code>).</p>
+
+<div class="tablewrap"><table>
+  <tr><th>Selection step</th><th class="n">Seeds</th></tr>
+  <tr><td>All seeds, OutDir0–24</td><td class="n">119,324</td></tr>
+  <tr><td>GPR base selection: finite values, dE/dx &lt; 1000, p &gt; 0, π/K/p label, seed <code>nclusters</code> ≥ 20</td><td class="n">94,957</td></tr>
+  <tr><td>+ event is in the FM sample</td><td class="n">89,391</td></tr>
+  <tr><td>+ at least one seed cluster with an FM score — <strong>used</strong></td><td class="n"><strong>89,390</strong></td></tr>
+</table></div>
+
+<ul>
+  <li><span class="gpr">GPR score:</span> <code>score_c = L_c·π_c(p) / Σ_k L_k·π_k(p)</code>, with
+    <code>L_c = 1/|dE/dx − μ_c(p)|</code> (band width fixed to 1) and <code>π_c(p)</code> the per-momentum-bin class
+    fraction. Bands and priors come from the unchanged GPR training (OutDir0–999, ncl ≥ 20, fit 0.5–2.0 GeV/c),
+    loaded from <code>fm-vs-gpr-2026-10-05-ncl20-evalOutDir0-24/gpr_model_calotrkana-1M-ncl_0.5_2.0_ncl20.csv</code>.</li>
+  <li><span class="fm">FM score:</span> the seed's mean per-cluster probabilities renormalized over π/K/p:
+    <code>score_c = prob_c / (prob_π + prob_K + prob_p)</code>.</li>
+</ul>
+<pre><code>$PY fm-vs-gpr/compare_same_seeds.py --outdir fm-vs-gpr-2026-10-05-same-seeds-ncl20</code></pre>
+
+<h2 id="auc">6. How the AUCs and errors are computed</h2>
+<h3>ROC and AUC</h3>
+<p>One-vs-rest among π/K/p: for species c, positives are the seeds labelled c and negatives are the seeds
+labelled with the other two species, in the same momentum bin (and the same origin/purity subset where
+applicable). A single routine, <code>roc_curve_np()</code> in <code>fm-vs-gpr/compare_pid_roc.py</code>, is
+used for both methods: seeds are sorted by score (descending), TPR/FPR are accumulated at each distinct
+score threshold, and the AUC is the trapezoidal area under (FPR, TPR).</p>
+
+<h3>Statistical error (Hanley–McNeil 1982)</h3>
+<p><code>auc_se()</code> in <code>fm-vs-gpr/seed_purity_study.py</code>. With A = AUC, N₊ = number of
+positives, N₋ = number of negatives:</p>
+<div class="formula">Q1 = A / (2 − A)&nbsp;&nbsp;&nbsp;&nbsp;Q2 = 2A² / (1 + A)<br>
+SE(A) = sqrt( [ A(1−A) + (N₊−1)(Q1 − A²) + (N₋−1)(Q2 − A²) ] / (N₊ · N₋) )</div>
+<p>Example (GPR, primary-seed kaons in [1,2)): A = 0.631, N₊ = 1,070, N₋ = 6,602 → SE ≈ 0.0097.</p>
+<div class="note">These are statistical errors only. They assume independent seeds and don't include
+systematics (GPR training, FM model variation). FM and GPR are evaluated on the <em>same</em> seeds, so their
+errors are correlated; combining them in quadrature overestimates the error on the FM − GPR difference.
+A paired test (DeLong or an event-level bootstrap) would be the rigorous way to quote that difference.</div>
+
+<h2 id="origin">7. Primary / secondary split and seed purity</h2>
+<p>Script: <code>fm-vs-gpr/seed_purity_study.py</code> (output in <code>fm-vs-gpr-2026-10-05-seed-purity/</code>).</p>
+<ul>
+  <li><strong>Truth track of a cluster:</strong> <code>reco_cluster_g4hit_trkid</code> from the original trees.
+    <strong>Negative ids are G4 secondaries</strong> (all present in the event's particle table) and count as
+    real particles; 0 means no truth (about 2% of TPC clusters).</li>
+  <li><strong>Top truth track of a seed:</strong> the most common non-zero track id among the seed's clusters.
+    Its PID equals <code>tpc_seeds_maxparticle_pid</code> for 99.96% of seeds.</li>
+  <li><strong>Origin:</strong> <em>primary</em> if the top track id &gt; 0, <em>secondary</em> if &lt; 0.
+    33.3% of the selected seeds are secondary.</li>
+  <li><strong>Seed purity:</strong> (seed clusters from the top track) / (seed <code>nclusters</code>).</li>
+  <li><strong>AUC by origin:</strong> the selected seeds are split by origin, then the one-vs-rest AUC and its
+    Hanley–McNeil error are computed per species within each momentum bin (§6).</li>
+</ul>
+<pre><code>$PY fm-vs-gpr/seed_purity_study.py --outdir fm-vs-gpr-2026-10-05-seed-purity</code></pre>
+
+<h2 id="results">8. Results tables</h2>
+
+<h3>8.1 Same seeds, all origins (ncl ≥ 20)</h3>
+<div class="tablewrap"><table>
+  <tr><th>p bin [GeV/c]</th><th>Species</th><th class="n">N<sub>sig</sub> / N<sub>tot</sub></th><th class="n gpr">GPR</th><th class="n fm">FM</th></tr>
+  <tr><td>[0.8, 1.2)</td><td>π</td><td class="n">9,390 / 12,731</td><td class="n">0.852</td><td class="n lead">0.875</td></tr>
+  <tr><td></td><td>K</td><td class="n">1,260 / 12,731</td><td class="n">0.695</td><td class="n lead">0.713</td></tr>
+  <tr><td></td><td>p</td><td class="n">2,081 / 12,731</td><td class="n">0.999</td><td class="n">0.998</td></tr>
+  <tr class="sep"><td>[1.0, 2.0)</td><td>π</td><td class="n">6,583 / 9,056</td><td class="n">0.718</td><td class="n lead">0.730</td></tr>
+  <tr><td></td><td>K</td><td class="n">1,106 / 9,056</td><td class="n lead">0.649</td><td class="n">0.605</td></tr>
+  <tr><td></td><td>p</td><td class="n">1,367 / 9,056</td><td class="n">0.921</td><td class="n lead">0.940</td></tr>
+  <tr class="sep"><td>[0.0, 1.0)*</td><td>π</td><td class="n">67,666 / 79,555</td><td class="n">0.652</td><td class="n">0.994</td></tr>
+  <tr><td></td><td>K</td><td class="n">4,125 / 79,555</td><td class="n">0.633</td><td class="n">0.984</td></tr>
+  <tr><td></td><td>p</td><td class="n">7,764 / 79,555</td><td class="n">0.910</td><td class="n">1.000</td></tr>
+</table></div>
+<p class="muted">* The GPR band is fit over 0.5–2.0 GeV/c and extrapolated below 0.5, so the [0,1) bin is not a fair comparison for GPR.</p>
+
+<h3>8.2 By origin of the seed's top truth track (± Hanley–McNeil SE)</h3>
+<div class="tablewrap"><table>
+  <tr><th>p bin</th><th>Origin</th><th>Species</th><th class="n">N<sub>sig</sub> / N<sub>tot</sub></th><th class="n gpr">GPR</th><th class="n fm">FM</th></tr>
+  <tr><td>[0.8, 1.2)</td><td>primary</td><td>π</td><td class="n">8,258 / 10,143</td><td class="n">0.774 ± 0.005</td><td class="n">0.792 ± 0.005</td></tr>
+  <tr><td></td><td></td><td>K</td><td class="n">1,193 / 10,143</td><td class="n">0.676 ± 0.009</td><td class="n">0.684 ± 0.009</td></tr>
+  <tr><td></td><td></td><td>p</td><td class="n">692 / 10,143</td><td class="n">0.999 ± 0.001</td><td class="n">0.998 ± 0.001</td></tr>
+  <tr><td></td><td>secondary</td><td>π</td><td class="n">1,132 / 2,588</td><td class="n">0.947 ± 0.005</td><td class="n lead">0.982 ± 0.003</td></tr>
+  <tr><td></td><td></td><td>K</td><td class="n">67 / 2,588</td><td class="n">0.761 ± 0.034</td><td class="n">0.799 ± 0.033</td></tr>
+  <tr><td></td><td></td><td>p</td><td class="n">1,389 / 2,588</td><td class="n">0.998 ± 0.001</td><td class="n">0.998 ± 0.001</td></tr>
+  <tr class="sep"><td>[1.0, 2.0)</td><td>primary</td><td>π</td><td class="n">5,980 / 7,672</td><td class="n">0.655 ± 0.007</td><td class="n">0.644 ± 0.007</td></tr>
+  <tr><td></td><td></td><td>K</td><td class="n">1,070 / 7,672</td><td class="n lead">0.631 ± 0.010</td><td class="n">0.587 ± 0.010</td></tr>
+  <tr><td></td><td></td><td>p</td><td class="n">622 / 7,672</td><td class="n">0.909 ± 0.008</td><td class="n">0.927 ± 0.007</td></tr>
+  <tr><td></td><td>secondary</td><td>π</td><td class="n">603 / 1,384</td><td class="n">0.860 ± 0.011</td><td class="n lead">0.913 ± 0.008</td></tr>
+  <tr><td></td><td></td><td>K</td><td class="n">36 / 1,384</td><td class="n">0.752 ± 0.047</td><td class="n">0.647 ± 0.050</td></tr>
+  <tr><td></td><td></td><td>p</td><td class="n">745 / 1,384</td><td class="n">0.929 ± 0.007</td><td class="n">0.939 ± 0.007</td></tr>
+</table></div>
+
+<h3>8.3 Species mix by origin (p ∈ [0.5, 2) GeV/c)</h3>
+<div class="tablewrap"><table>
+  <tr><th>Origin</th><th class="n">π</th><th class="n">K</th><th class="n">p</th></tr>
+  <tr><td>primary</td><td class="n">84.2%</td><td class="n">10.8%</td><td class="n">5.0%</td></tr>
+  <tr><td>secondary</td><td class="n">46.8%</td><td class="n">2.0%</td><td class="n">51.2%</td></tr>
+</table></div>
+
+<h3>8.4 Seed purity</h3>
+<p>Purity quantiles (5/25/50/75/95%): 0.82 / 0.89 / 0.93 / 0.96 / 1.00. A purity ≥ 0.5 cut keeps 89,292 seeds (99.9%);
+purity ≥ 0.9 keeps 60,895 (68.1%). With purity ≥ 0.9:</p>
+<div class="tablewrap"><table>
+  <tr><th>p bin</th><th>Species</th><th class="n gpr">GPR</th><th class="n fm">FM</th></tr>
+  <tr><td>[0.8, 1.2)</td><td>π</td><td class="n">0.865</td><td class="n lead">0.886</td></tr>
+  <tr><td></td><td>K</td><td class="n">0.691</td><td class="n lead">0.714</td></tr>
+  <tr><td></td><td>p</td><td class="n">0.999</td><td class="n">0.999</td></tr>
+  <tr class="sep"><td>[1.0, 2.0)</td><td>π</td><td class="n">0.724</td><td class="n lead">0.741</td></tr>
+  <tr><td></td><td>K</td><td class="n lead">0.655</td><td class="n">0.611</td></tr>
+  <tr><td></td><td>p</td><td class="n">0.919</td><td class="n lead">0.942</td></tr>
+</table></div>
+
+<h3>8.5 TPC clusters FM does not score (FM events)</h3>
+<div class="tablewrap"><table>
+  <tr><th>Truth origin</th><th class="n">TPC clusters</th><th class="n">Scored by FM</th><th class="n">Share of unscored</th></tr>
+  <tr><td>primary (id &gt; 0)</td><td class="n">6,625,589</td><td class="n">98.9%</td><td class="n">4.1%</td></tr>
+  <tr><td>secondary (id &lt; 0)</td><td class="n">12,110,320</td><td class="n">86.1%</td><td class="n">95.9%</td></tr>
+</table></div>
+
+<h3>Summary</h3>
+<ul>
+  <li>On the same seeds, FM is better than or equal to GPR in 5 of the 6 species × bin combinations within the
+    GPR fit range; the exception is kaons in [1,2).</li>
+  <li>Seed purity is high and doesn't change the FM–GPR ordering.</li>
+  <li>A third of the seeds are secondaries, about half of them protons; FM is particularly strong for secondary
+    pions. On primary seeds, FM and GPR agree within ~1–2σ in [0.8,1.2), and GPR is better for kaons in [1,2)
+    (0.631 vs 0.587).</li>
+</ul>
+
+<h2 id="plots">9. Plots</h2>
+<p class="muted">Images are loaded from the result folders next to <code>fm-vs-gpr/</code>; open this file from the
+repository checkout so the relative paths resolve.</p>
+
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-same-seeds-ncl20/pid_roc_comparison_0.8_1.2.png" alt="Same-seed ROC, p in [0.8,1.2)">
+  <figcaption>Same seeds, p ∈ [0.8, 1.2) GeV/c: one-vs-rest ROC for π / K / p, FM (blue) vs. GPR (red).</figcaption>
+</figure>
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-same-seeds-ncl20/pid_roc_comparison_1.0_2.0.png" alt="Same-seed ROC, p in [1,2)">
+  <figcaption>Same seeds, p ∈ [1.0, 2.0) GeV/c.</figcaption>
+</figure>
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-same-seeds-ncl20/pid_roc_comparison_0.0_1.0.png" alt="Same-seed ROC, p in [0,1)">
+  <figcaption>Same seeds, p ∈ [0.0, 1.0) GeV/c (GPR band extrapolated below 0.5 GeV/c).</figcaption>
+</figure>
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-seed-purity/seed_purity_distribution.png" alt="Seed purity distribution">
+  <figcaption>Seed purity distribution per species (log scale).</figcaption>
+</figure>
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-seed-purity/auc_vs_purity_0.8_1.2.png" alt="AUC vs purity, [0.8,1.2)">
+  <figcaption>AUC vs. seed purity bin, p ∈ [0.8, 1.2) GeV/c, with Hanley–McNeil errors.</figcaption>
+</figure>
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-seed-purity/auc_vs_purity_1.0_2.0.png" alt="AUC vs purity, [1,2)">
+  <figcaption>AUC vs. seed purity bin, p ∈ [1.0, 2.0) GeV/c.</figcaption>
+</figure>
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-seed-purity/purity_ge_0.9/pid_roc_comparison_0.8_1.2.png" alt="Purity >= 0.9 ROC, [0.8,1.2)">
+  <figcaption>Same seeds with purity ≥ 0.9, p ∈ [0.8, 1.2) GeV/c.</figcaption>
+</figure>
+<figure>
+  <img src="../fm-vs-gpr-2026-10-05-seed-purity/purity_ge_0.9/pid_roc_comparison_1.0_2.0.png" alt="Purity >= 0.9 ROC, [1,2)">
+  <figcaption>Same seeds with purity ≥ 0.9, p ∈ [1.0, 2.0) GeV/c.</figcaption>
+</figure>
+
+<h2 id="validation">10. Validation</h2>
+<ul>
+  <li><strong>Matching:</strong> every FM point matched, with the energy and track-id cross-checks at 100% (§2).</li>
+  <li><strong>Merged file (segment 0):</strong> all 11 copied branches identical to the original; per-truth-track
+    FM means rebuilt from the ROOT file equal the CSV for all 12,120 tracks (≤ 1.2e-7); per-seed means equal an
+    independent plain-loop recomputation (162 seeds, ≤ 2.4e-7); the file works as a ROOT friend tree with
+    aligned entries and seed counts.</li>
+  <li><strong>Same-seed GPR:</strong> with <code>--no-require-fm</code> (all seeds), the GPR AUCs and counts are
+    identical to the earlier GPR evaluation on OutDir0–24 in all three bins.</li>
+  <li><strong>Refactors:</strong> the plotting/selection refactor of <code>compare_pid_roc.py</code> and the
+    table-building refactor of <code>compare_same_seeds.py</code> both reproduce their earlier outputs
+    pixel-identically.</li>
+</ul>
+
+<h2 id="caveats">11. Caveats and open questions</h2>
+<ul>
+  <li>The GPR evaluation sample (OutDir0–24) is also part of the GPR training sample (OutDir0–999, 2.5% overlap);
+    kept on purpose, expected to be negligible for a smooth 1-D band fit.</li>
+  <li>The earlier truth-track FM comparisons kept only <code>seg_target &gt; 0</code>, i.e. primary truth tracks,
+    and are not directly comparable to the all-seed numbers here.</li>
+  <li>FM kaons on primary seeds in [1,2) (0.587) are well below FM kaons on primary truth tracks (0.700).
+    Open question: is it the seed-cluster averaging (vs. the full truth track) or the seed population?
+    Scoring the primary seeds with their truth track's full-track FM score would separate the two.</li>
+  <li>The reason for the 5,275 events missing from the FM CSV (a likely event-size selection) should be
+    confirmed with Gabor.</li>
+</ul>
+
+<h2 id="files">12. Scripts and files</h2>
+<div class="tablewrap"><table>
+  <tr><th>Path (relative to <code>/sphenix/user/hwyu/dedx</code>)</th><th>Purpose</th></tr>
+  <tr><td><code>fm-vs-gpr/merge_fm_to_root.py</code></td><td>Matches FM points to trad clusters and writes the merged ROOT files (§2–3)</td></tr>
+  <tr><td><code>fm-vs-gpr/compare_same_seeds.py</code></td><td>Same-seed selection, GPR and FM scores, ROC plots (§5)</td></tr>
+  <tr><td><code>fm-vs-gpr/seed_purity_study.py</code></td><td>Seed purity, origin split, AUC errors, unscored-cluster breakdown (§6–7)</td></tr>
+  <tr><td><code>fm-vs-gpr/compare_pid_roc.py</code></td><td>Shared ROC routine, GPR training/scoring, plotting</td></tr>
+  <tr><td><code>fm-vs-gpr/make_ncl_root.py</code></td><td>Re-skims the trad trees with <code>tpc_seeds_nclusters</code> (GPR training/eval files)</td></tr>
+  <tr><td><code>fm-vs-gpr/env.sh</code></td><td>Environment setup (<code>$PY</code>)</td></tr>
+  <tr><td><code>fm-vs-gpr-2026-10-05-same-seeds-ncl20/</code></td><td>Same-seed results: plots, AUC tables, per-seed scores, README</td></tr>
+  <tr><td><code>fm-vs-gpr-2026-10-05-seed-purity/</code></td><td>Purity / origin results: plots, <code>auc_by_origin.csv</code>, <code>auc_vs_purity.csv</code>, README</td></tr>
+  <tr><td><code>/sphenix/user/hwyu/calotrack_tree/macro/dedx-v2/fm-merged-run21-25seg/</code></td><td>Merged ROOT files, <code>merge_stats.csv</code>, <code>merge.log</code></td></tr>
+</table></div>
+
+</div>
+</body>
+</html>
